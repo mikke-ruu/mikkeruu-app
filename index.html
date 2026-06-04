@@ -2204,6 +2204,64 @@
         return false;
       }
     }
+    function mapSupabaseApplicationRow(row){
+      var ev = (EVENTS||[]).find(function(item){return item.supabaseId===row.event_id || item.id===row.event_id;});
+      var isEv = ev ? isParticipantOnlyEvent(ev) : row.category==='event';
+      return {
+        id: row.id,
+        supabaseId: row.id,
+        person: row.user_id || '',
+        user_id: row.user_id || '',
+        event: ev ? ev.id : row.event_id,
+        status: row.status === 'confirmed' ? 'confirmed' : row.status === 'hold' ? 'hold' : 'new',
+        line: '0',
+        eyecatch: row.eyecatch_image_url ? '1' : '0',
+        eyecatchImage: row.eyecatch_image_url || '',
+        category: row.category || (isEv ? 'event' : ''),
+        party: 'tbd',
+        first: 'first',
+        personname: row.person_name || '',
+        shopname: row.shop_name || row.person_name || '',
+        feeplan: isEv ? 'event-fee' : '',
+        email: row.email || '',
+        kana: row.kana || '',
+        member: '',
+        uwid: row.uword_id || '',
+        achiever: '',
+        social: row.instagram || '',
+        content: row.content || '',
+        attendeeCount: row.attendee_count || 1,
+        comment: row.appeal || '',
+        adminRequest: row.admin_memo || '',
+        createdAt: datePartFromIso(row.created_at),
+        source: 'supabase'
+      };
+    }
+    async function loadAdminApplicationsFromSupabase(){
+      if(CURRENT_USER_ROLE!=='admin') return false;
+      var sb = getSupabaseClient();
+      if(!sb) return false;
+      try{
+        var res = await sb.from('applications')
+          .select('id,event_id,user_id,email,person_name,kana,shop_name,category,content,appeal,instagram,uword_id,attendee_count,status,eyecatch_image_url,admin_memo,created_at')
+          .order('created_at', {ascending:false});
+        if(res.error) throw res.error;
+        (res.data||[]).map(mapSupabaseApplicationRow).forEach(function(app){
+          APPLICATIONS = (APPLICATIONS||[]).filter(function(local){
+            if(local.source==='supabase') return local.id!==app.id;
+            return !(String(local.email||'').toLowerCase()===String(app.email||'').toLowerCase() && local.event===app.event);
+          });
+          upsertById(APPLICATIONS, app);
+        });
+        renderApplications();
+        renderMypageEventCards();
+        showToast('Supabaseの申込一覧を読み込みました', 'success');
+        return true;
+      }catch(e){
+        showToast('Supabase申込一覧の読み込みに失敗しました', 'warn');
+        return false;
+      }
+    }
     function seedRealTestDataOnce(){
       if(localStorage.getItem(REAL_SEED_KEY)==='1') return;
       var asset = function(name){ return 'seed-assets/' + name; };
@@ -10136,8 +10194,9 @@ mikke.ruu2025@gmail.com`,
       bindApplyReuseEvents();
       bindApplyDraftEvents();
       tryLoginByUrlToken();
-      initSupabaseAuthFromUrl();
-      loadPublicEventsFromSupabase();
+      initSupabaseAuthFromUrl()
+        .then(loadPublicEventsFromSupabase)
+        .then(loadAdminApplicationsFromSupabase);
     });
     // 即実行も保険で
     setTimeout(renderAll, 100);
