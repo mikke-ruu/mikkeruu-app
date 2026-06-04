@@ -3467,8 +3467,8 @@
       markStateDirty();
       return true;
     }
-    function getAppStatusLabel(status){
-      return status==='confirmed'?'出店確定':(status==='hold'?'保留':'新規');
+    function getAppStatusLabel(status, isEventApp){
+      return status==='confirmed'?(isEventApp?'参加確定':'出店確定'):(status==='hold'?'保留':'新規');
     }
     function getAppStatusClass(status){
       return status==='confirmed'?' mint':(status==='hold'?' orange':'');
@@ -3484,7 +3484,7 @@
       var isEventApp = isParticipantOnlyEvent(ev) || app.category==='event';
       var appThumb = app.eyecatchImage || '';
       var lineDone = app.line==='1';
-      var statusLabel = getAppStatusLabel(app.status);
+      var statusLabel = getAppStatusLabel(app.status, isEventApp);
       var statusClass = getAppStatusClass(app.status);
       var partyLabel = getPartyChipLabel(app.party);
       var partyClass = getPartyChipClass(app.party);
@@ -4125,13 +4125,20 @@
       },350);
     }
     async function updateSupabaseApplicationStatus(card, status, previousStatus){
-      if(!card || card.dataset.source!=='supabase') return false;
+      if(!card) return false;
       if(CURRENT_USER_ROLE!=='admin') return false;
       var sb = getSupabaseClient();
       if(!sb) return false;
+      var targetId = card.dataset.supabaseid || card.id || '';
+      var looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
+      if(card.dataset.source!=='supabase' && !looksLikeUuid) return false;
       try{
         var dbStatus = status==='confirmed' ? 'confirmed' : status==='hold' ? 'hold' : 'new';
-        var res = await sb.from('applications').update({status: dbStatus, updated_at: new Date().toISOString()}).eq('id', card.dataset.supabaseid || card.id);
+        var res = await sb.from('applications')
+          .update({status: dbStatus, updated_at: new Date().toISOString()})
+          .eq('id', targetId)
+          .select('id,status')
+          .single();
         if(res.error) throw res.error;
         var app = (APPLICATIONS||[]).find(function(item){return item.id===card.id;});
         if(app) app.status = dbStatus;
@@ -4141,7 +4148,7 @@
         return true;
       }catch(e){
         card.dataset.status = previousStatus || 'new';
-        showToast('Supabaseのステータス更新に失敗しました', 'warn');
+        showToast('Supabase更新エラー：' + ((e&&e.message)||'権限または対象行を確認してください'), 'warn');
         renderApplications();
         return false;
       }
