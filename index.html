@@ -3526,7 +3526,7 @@
             '</div>'+
           '</div>';
       return ''+
-      '<article class="exhibitor-card" id="'+h(app.id)+'" data-event="'+h(app.event)+'" data-status="'+h(app.status)+'" data-line="'+h(app.line)+'" data-eyecatch="'+h(app.eyecatch)+'" data-eyecatchsrc="'+h(app.eyecatchImage||'')+'" data-category="'+h(app.category)+'" data-kind="'+(isEventApp?'event':'bazaar')+'" data-party="'+h(app.party)+'" data-search="'+h((app.personname||'')+' '+(app.kana||'')+' '+(app.shopname||'')+' '+(app.email||'')).toLowerCase()+'" data-person="'+h(app.person)+'" data-personname="'+h(app.personname)+'" data-shopname="'+h(app.shopname)+'" data-feeplan="'+h(app.feeplan)+'" data-email="'+h(app.email)+'" data-adminrequest="'+h(app.adminRequest||'')+'" data-attendeecount="'+h(String(attendeeCount))+'">'+
+      '<article class="exhibitor-card" id="'+h(app.id)+'" data-source="'+h(app.source||'local')+'" data-supabaseid="'+h(app.supabaseId||'')+'" data-event="'+h(app.event)+'" data-status="'+h(app.status)+'" data-line="'+h(app.line)+'" data-eyecatch="'+h(app.eyecatch)+'" data-eyecatchsrc="'+h(app.eyecatchImage||'')+'" data-category="'+h(app.category)+'" data-kind="'+(isEventApp?'event':'bazaar')+'" data-party="'+h(app.party)+'" data-search="'+h((app.personname||'')+' '+(app.kana||'')+' '+(app.shopname||'')+' '+(app.email||'')).toLowerCase()+'" data-person="'+h(app.person)+'" data-personname="'+h(app.personname)+'" data-shopname="'+h(app.shopname)+'" data-feeplan="'+h(app.feeplan)+'" data-email="'+h(app.email)+'" data-adminrequest="'+h(app.adminRequest||'')+'" data-attendeecount="'+h(String(attendeeCount))+'">'+
         (isEventApp ?
         '<button class="exhibitor-card-header" type="button" style="grid-template-columns:1fr 22px;padding:14px 16px;align-items:start" onclick="toggleAppCard(\''+h(app.id)+'\')">'+
           '<div>'+
@@ -3579,6 +3579,8 @@
       APPLICATIONS = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card')).map(function(card){
         return {
           id: card.id || ('app-'+Date.now().toString(36)),
+          source: card.dataset.source || 'local',
+          supabaseId: card.dataset.supabaseid || '',
           person: card.dataset.person || '',
           event: card.dataset.event || '',
           status: card.dataset.status || 'new',
@@ -4099,23 +4101,50 @@
     function setAppStatus(cardId,status,btn){
       var card=document.getElementById(cardId);
       if(!card) return;
+      var previousStatus = card.dataset.status || 'new';
       card.dataset.status=status;
       card.querySelectorAll('.status-chip').forEach(function(b){b.classList.remove('active');});
       btn.classList.add('active');
       var badge=card.querySelector('.app-status-badge');
       if(badge){
-        badge.textContent=status==='new'?'新規':status==='confirmed'?'出店確定':'保留';
+        badge.textContent=status==='new'?'新規':status==='confirmed'?(card.dataset.kind==='event'?'参加確定':'出店確定'):'保留';
         badge.className='badge app-status-badge';
         if(status==='confirmed') badge.classList.add('mint');
         else if(status==='hold') badge.classList.add('orange');
       }
+      updateSupabaseApplicationStatus(card, status, previousStatus);
       setTimeout(function(){
         filterAppsCombined();
         syncApplicationsFromCards();
         renderEventList();
+        syncMypageProfileFromLatestApplication();
+        renderMypageEventCards();
+        renderDetailPage();
         var dashEv = typeof getCurrentDashboardEvent==='function' ? getCurrentDashboardEvent() : null;
         if(dashEv && typeof applyEventData==='function') applyEventData(dashEv.key);
       },350);
+    }
+    async function updateSupabaseApplicationStatus(card, status, previousStatus){
+      if(!card || card.dataset.source!=='supabase') return false;
+      if(CURRENT_USER_ROLE!=='admin') return false;
+      var sb = getSupabaseClient();
+      if(!sb) return false;
+      try{
+        var dbStatus = status==='confirmed' ? 'confirmed' : status==='hold' ? 'hold' : 'new';
+        var res = await sb.from('applications').update({status: dbStatus, updated_at: new Date().toISOString()}).eq('id', card.dataset.supabaseid || card.id);
+        if(res.error) throw res.error;
+        var app = (APPLICATIONS||[]).find(function(item){return item.id===card.id;});
+        if(app) app.status = dbStatus;
+        markStateDirty();
+        saveAppState();
+        showToast(dbStatus==='confirmed' ? 'Supabaseでも確定に更新しました' : 'Supabaseの申込ステータスを更新しました', 'success');
+        return true;
+      }catch(e){
+        card.dataset.status = previousStatus || 'new';
+        showToast('Supabaseのステータス更新に失敗しました', 'warn');
+        renderApplications();
+        return false;
+      }
     }
     function toggleAppLine(id,checkbox){
       var card=document.getElementById(id);
