@@ -3151,9 +3151,11 @@
       try{
         var res = await sb.from('applications').insert(payload);
         if(res.error) throw res.error;
+        showToast('Supabaseにも申込を保存しました', 'success');
         return true;
       }catch(e){
-        showToast('申込は画面に保存済みです。Supabase保存は後で確認してください。', 'warn');
+        var msg = e && e.message ? e.message : '保存エラー';
+        showToast('Supabase保存エラー：' + msg, 'warn');
         return false;
       }
     }
