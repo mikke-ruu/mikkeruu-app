@@ -2147,6 +2147,63 @@
       if(idx>=0) list[idx] = item;
       else list.unshift(item);
     }
+    function datePartFromIso(v){
+      if(!v) return '';
+      return String(v).slice(0,10);
+    }
+    function timePartFromIso(v){
+      if(!v) return '';
+      var d = new Date(v);
+      if(Number.isNaN(d.getTime())) return '';
+      return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+    }
+    function mapSupabaseEventRow(row){
+      var date = datePartFromIso(row.starts_at);
+      return {
+        id: row.slug || row.id,
+        supabaseId: row.id,
+        slug: row.slug || '',
+        kind: row.kind === 'event' ? 'イベント' : 'バザール',
+        content: row.detail || '',
+        name: row.title || row.short_title || '名称未設定',
+        date: date,
+        dayOfWeek: date ? computeDayOfWeek(date) : '',
+        startTime: timePartFromIso(row.starts_at),
+        endTime: timePartFromIso(row.ends_at),
+        venue: row.venue || '',
+        address: row.address || '',
+        mapUrl: row.map_url || '',
+        image: row.cover_image_url || '',
+        coverImage: row.cover_image_url || '',
+        deadline: row.application_deadline || '',
+        capacity: row.capacity || 0,
+        lineUrl: row.line_group_url || '',
+        status: row.status === 'draft' ? 'draft' : 'public',
+        party: {enabled:false},
+        source: 'supabase'
+      };
+    }
+    async function loadPublicEventsFromSupabase(){
+      var sb = getSupabaseClient();
+      if(!sb) return false;
+      try{
+        var res = await sb.from('events')
+          .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,detail,cover_image_url,line_group_url,capacity,application_deadline')
+          .in('status', ['public','closed','past'])
+          .order('starts_at', {ascending:true});
+        if(res.error) throw res.error;
+        (res.data||[]).forEach(function(row){ upsertById(EVENTS, mapSupabaseEventRow(row)); });
+        normalizeEventDefaults();
+        syncPublicEventViews();
+        renderEventList();
+        renderAdminEventOnlyList();
+        renderMypageEventCards();
+        return true;
+      }catch(e){
+        showToast('Supabaseのイベント読み込みに失敗しました。試作用データを表示します。', 'warn');
+        return false;
+      }
+    }
     function seedRealTestDataOnce(){
       if(localStorage.getItem(REAL_SEED_KEY)==='1') return;
       var asset = function(name){ return 'seed-assets/' + name; };
@@ -10040,6 +10097,7 @@ mikke.ruu2025@gmail.com`,
       bindApplyDraftEvents();
       tryLoginByUrlToken();
       initSupabaseAuthFromUrl();
+      loadPublicEventsFromSupabase();
     });
     // 即実行も保険で
     setTimeout(renderAll, 100);
