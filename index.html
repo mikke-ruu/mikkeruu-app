@@ -3149,14 +3149,8 @@
       var payload = buildSupabaseApplicationPayload(data);
       if(!sb || !payload) return false;
       try{
-        var res = await sb.from('applications').insert(payload).select('id').single();
+        var res = await sb.from('applications').insert(payload);
         if(res.error) throw res.error;
-        var local = (APPLICATIONS||[]).find(function(app){return app.id===localAppId;});
-        if(local && res.data && res.data.id){
-          local.supabaseId = res.data.id;
-          markStateDirty();
-          saveAppState();
-        }
         return true;
       }catch(e){
         showToast('申込は画面に保存済みです。Supabase保存は後で確認してください。', 'warn');
