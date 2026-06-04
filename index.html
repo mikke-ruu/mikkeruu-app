@@ -1930,6 +1930,7 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     if('scrollRestoration' in history){history.scrollRestoration='manual'}
     let applyStep = 1;
@@ -1948,6 +1949,9 @@
     var LOGIN_LINK_BUFFER = '';
     var LOGIN_TOKENS = {};
     var FAVORITES_BY_USER = {};
+    var SUPABASE_URL = 'https://eqmhrtbfkgccdksyokqk.supabase.co';
+    var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVxbWhydGJma2djY2Rrc3lva3FrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTA3ODEsImV4cCI6MjA5NjEyNjc4MX0.1Uf_LbYkPqU3oDLK6hsncPSyLjfOkfg0tOo7n1yHcw0';
+    var SUPABASE_CLIENT = null;
     var __stateDirty = false;
     var __appsKindMode = 'all'; // 'all'|'bazaar'|'event'
     var __appsSummaryQuickFilter = null;
@@ -1958,6 +1962,73 @@
     function parseJsonSafe(raw, fallback){
       if(!raw) return fallback;
       try{return JSON.parse(raw);}catch(e){return fallback;}
+    }
+    function getSupabaseClient(){
+      if(SUPABASE_CLIENT) return SUPABASE_CLIENT;
+      if(!window.supabase || !window.supabase.createClient) return null;
+      SUPABASE_CLIENT = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {persistSession:true, autoRefreshToken:true, detectSessionInUrl:false}
+      });
+      return SUPABASE_CLIENT;
+    }
+    async function syncProfileFromSupabaseSession(session){
+      var sb = getSupabaseClient();
+      if(!sb || !session || !session.user) return false;
+      CURRENT_USER_EMAIL = session.user.email || CURRENT_USER_EMAIL || '';
+      CURRENT_USER_ID = session.user.id || CURRENT_USER_ID || '';
+      CURRENT_USER_ROLE = 'exhibitor';
+      try{
+        var res = await sb.from('profiles').select('role,display_name,email').eq('user_id', session.user.id).maybeSingle();
+        if(res && res.data){
+          CURRENT_USER_ROLE = res.data.role === 'admin' ? 'admin' : 'exhibitor';
+          CURRENT_USER_EMAIL = res.data.email || CURRENT_USER_EMAIL;
+        }
+      }catch(e){}
+      refreshCurrentUserEventsByEmail(CURRENT_USER_EMAIL);
+      markStateDirty();
+      saveAppState();
+      return true;
+    }
+    async function initSupabaseAuthFromUrl(){
+      var sb = getSupabaseClient();
+      if(!sb) return false;
+      var rawHash = location.hash || '';
+      var params = new URLSearchParams(rawHash.replace(/^#/, ''));
+      if(params.get('error')){
+        var code = params.get('error_code') || '';
+        history.replaceState(null, '', location.pathname + '#home');
+        showPage('home', true);
+        showToast(code === 'otp_expired' ? 'ログインリンクの有効期限が切れています。新しいリンクを送ってください。' : 'ログインリンクを確認できませんでした', 'warn');
+        return false;
+      }
+      if(params.get('access_token')){
+        var accessToken = params.get('access_token');
+        var refreshToken = params.get('refresh_token');
+        try{
+          var authRes = refreshToken
+            ? await sb.auth.setSession({access_token:accessToken, refresh_token:refreshToken})
+            : await sb.auth.getUser(accessToken);
+          var session = authRes && authRes.data && authRes.data.session;
+          if(!session && authRes && authRes.data && authRes.data.user){
+            session = {user: authRes.data.user};
+          }
+          if(await syncProfileFromSupabaseSession(session)){
+            history.replaceState(null, '', location.pathname + '#mypage');
+            showPage('mypage', true);
+            renderAll();
+            showToast('マイページにログインしました', 'success');
+            return true;
+          }
+        }catch(e){
+          showToast('ログイン処理に失敗しました', 'warn');
+        }
+      }
+      try{
+        var current = await sb.auth.getSession();
+        var session2 = current && current.data && current.data.session;
+        if(session2) await syncProfileFromSupabaseSession(session2);
+      }catch(e){}
+      return false;
     }
     function captureProfileSnapshot(){
       var getText = function(id){var el=document.getElementById(id);return el?(el.textContent||'').trim():'';};
@@ -9918,6 +9989,7 @@ mikke.ruu2025@gmail.com`,
       bindApplyReuseEvents();
       bindApplyDraftEvents();
       tryLoginByUrlToken();
+      initSupabaseAuthFromUrl();
     });
     // 即実行も保険で
     setTimeout(renderAll, 100);
