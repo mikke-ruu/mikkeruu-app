@@ -3121,6 +3121,48 @@
         consent: !!((document.getElementById('apply-consent')||{}).checked)
       };
     }
+    function buildSupabaseApplicationPayload(data){
+      var ev = (EVENTS||[]).find(function(e){return e.id===data.eventId;});
+      if(!ev || !ev.supabaseId) return null;
+      return {
+        event_id: ev.supabaseId,
+        user_id: CURRENT_USER_ID && CURRENT_USER_ID.indexOf('person-')!==0 ? CURRENT_USER_ID : null,
+        email: data.email,
+        person_name: data.personName,
+        kana: data.kana || null,
+        shop_name: data.isParticipantEvent ? null : data.shopName,
+        category: data.categoryKey || null,
+        content: data.isParticipantEvent ? (data.adminRequest || '') : data.content,
+        appeal: data.comment || null,
+        instagram: data.social || null,
+        uword_id: data.uwid || null,
+        attendee_count: data.attendeeCount || 1,
+        status: 'new',
+        eyecatch_image_url: data.eyecatch || null,
+        admin_memo: data.adminRequest || null,
+        public_profile_enabled: !data.isParticipantEvent,
+        privacy_consent_at: new Date().toISOString()
+      };
+    }
+    async function saveApplicationToSupabase(data, localAppId){
+      var sb = getSupabaseClient();
+      var payload = buildSupabaseApplicationPayload(data);
+      if(!sb || !payload) return false;
+      try{
+        var res = await sb.from('applications').insert(payload).select('id').single();
+        if(res.error) throw res.error;
+        var local = (APPLICATIONS||[]).find(function(app){return app.id===localAppId;});
+        if(local && res.data && res.data.id){
+          local.supabaseId = res.data.id;
+          markStateDirty();
+          saveAppState();
+        }
+        return true;
+      }catch(e){
+        showToast('申込は画面に保存済みです。Supabase保存は後で確認してください。', 'warn');
+        return false;
+      }
+    }
     function renderApplyConfirmation(){
       var d = getApplyFormData();
       var setText = function(id, text){
@@ -3557,7 +3599,7 @@
       }
       var id = 'app-'+Date.now().toString(36);
       var personId = 'person-'+Date.now().toString(36);
-      APPLICATIONS.unshift({
+      var localApplication = {
         id: id,
         person: personId,
         event: data.eventId,
@@ -3582,7 +3624,8 @@
         comment: data.comment,
         adminRequest: data.adminRequest || '',
         createdAt: todayStr()
-      });
+      };
+      APPLICATIONS.unshift(localApplication);
       CURRENT_USER_ROLE = 'exhibitor';
       CURRENT_USER_ID = personId;
       CURRENT_USER_EMAIL = data.email || CURRENT_USER_EMAIL;
@@ -3662,6 +3705,7 @@
       resetApplyTermsAck();
       markStateDirty();
       saveAppState();
+      saveApplicationToSupabase(data, id);
       showToast(data.isParticipantEvent ? '参加申込を受付しました' : '出店申込を受付しました','success');
     }
     function toggleInlineDetail(){var detail=document.getElementById('home-inline-detail');if(detail){detail.classList.toggle('open')}}
