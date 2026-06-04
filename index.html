@@ -156,6 +156,12 @@
     .private-card{margin-top:12px;padding:14px;border-radius:20px;background:#fff;border:1px solid var(--line);box-shadow:0 10px 24px rgba(84,64,74,.045);cursor:pointer}
     .private-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.private-head h2{font-size:15px;margin:0}.private-head span{font-size:12px;color:var(--sub)}
     .private-grid{display:none;gap:8px;margin-top:12px}.private-card.open .private-grid{display:grid}.private-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:13px}.private-row span{color:var(--sub)}.private-row b{font-size:13px}
+    .mypage-state-card{display:none;margin:0 0 14px;padding:15px 16px;border-radius:22px;background:#fff;border:1px solid var(--line);box-shadow:0 12px 30px rgba(84,64,74,.06)}
+    .mypage-state-card.show{display:grid;gap:10px}
+    .mypage-state-card h2{margin:0;font-size:16px;color:var(--ink);display:flex;align-items:center;gap:7px}
+    .mypage-state-card p{margin:0;color:var(--sub);font-size:13px;line-height:1.7}
+    .mypage-state-actions{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+    .mypage-state-actions .primary,.mypage-state-actions .secondary{min-height:42px}
     .mypage-save-tip{width:100%;margin-top:12px;padding:13px 14px;border-radius:20px;background:#fff8f3;border:1px solid #f2dfcf;display:grid;grid-template-columns:34px 1fr;gap:10px;align-items:center;color:var(--sub);font-size:12px;line-height:1.6;text-align:left}
     .mypage-save-tip b{display:block;color:var(--ink);font-size:13px;margin-bottom:2px}
     .next-label{display:inline-flex;align-items:center;width:max-content;border-radius:999px;background:#fff3f6;color:var(--ruu);font-size:11px;font-weight:900;padding:6px 10px;margin-bottom:8px}
@@ -1237,6 +1243,12 @@
       <section id="mypage" class="page">
         <h1 class="page-title">マイページ</h1>
 
+        <div class="mypage-state-card" id="mypage-state-card">
+          <h2 id="mypage-state-title">マイページ</h2>
+          <p id="mypage-state-body"></p>
+          <div class="mypage-state-actions" id="mypage-state-actions"></div>
+        </div>
+
         <!-- 公開エリア -->
         <div class="mp-card" id="mp-public-profile">
           <div class="mp-card-header public">
@@ -1288,7 +1300,7 @@
         <div class="tabs" id="mypage-event-tabs">
           <button class="active" onclick="filterMypageEvents(this,'all')">すべて</button>
           <button onclick="filterMypageEvents(this,'applied')">申込中</button>
-          <button onclick="filterMypageEvents(this,'confirmed')">出店確定</button>
+          <button onclick="filterMypageEvents(this,'confirmed')">確定</button>
           <button onclick="filterMypageEvents(this,'ended')">終了</button>
         </div>
 
@@ -3125,6 +3137,63 @@
       });
       CURRENT_USER_EVENTS = next;
     }
+    function getCurrentUserApplications(){
+      var emailKey = String(CURRENT_USER_EMAIL||'').trim().toLowerCase();
+      var userKey = String(CURRENT_USER_ID||'').trim();
+      return (APPLICATIONS||[]).filter(function(app){
+        var appEmail = String(app.email||'').trim().toLowerCase();
+        var appUser = String(app.user_id||app.userId||app.person||'').trim();
+        return (emailKey && appEmail===emailKey) || (userKey && appUser===userKey);
+      });
+    }
+    function isBazaarApplication(app){
+      if(!app) return false;
+      var event = (EVENTS||[]).find(function(e){return e.id===app.event;});
+      return !(app.category==='event' || isParticipantOnlyEvent(event));
+    }
+    function getMypageAccessMode(userApps){
+      var apps = Array.isArray(userApps) ? userApps : getCurrentUserApplications();
+      if(CURRENT_USER_ROLE==='admin' && apps.length===0) return 'admin-empty';
+      if(apps.some(isBazaarApplication)) return 'bazaar';
+      if(apps.length>0) return 'event';
+      return 'empty';
+    }
+    function renderMypageAccessState(userApps){
+      var apps = Array.isArray(userApps) ? userApps : getCurrentUserApplications();
+      var mode = getMypageAccessMode(apps);
+      var hasBazaarApp = mode==='bazaar';
+      var profile = document.getElementById('mp-public-profile');
+      if(profile) profile.style.display = hasBazaarApp ? '' : 'none';
+      var memberCell = document.getElementById('priv-member-cell');
+      var achieverCell = document.getElementById('priv-achiever-cell');
+      if(memberCell) memberCell.style.display = hasBazaarApp ? '' : 'none';
+      if(achieverCell) achieverCell.style.display = hasBazaarApp ? '' : 'none';
+      var guide = document.getElementById('mypage-state-card');
+      var title = document.getElementById('mypage-state-title');
+      var body = document.getElementById('mypage-state-body');
+      var actions = document.getElementById('mypage-state-actions');
+      var noticeHelper = document.querySelector('#mypage-notice-section .helper');
+      if(noticeHelper){
+        noticeHelper.textContent = hasBazaarApp ? '出店者向け・イベント別・あなた宛ての連絡はここに届きます。' : 'イベント別・あなた宛ての連絡はここに届きます。';
+      }
+      var showGuide = mode!=='bazaar';
+      if(!guide || !title || !body || !actions) return;
+      guide.classList.toggle('show', showGuide);
+      if(!showGuide) return;
+      if(mode==='admin-empty'){
+        title.textContent = '運営アカウントでログイン中';
+        body.textContent = '申込者用の公開プロフィールは表示していません。イベント作成や申込確認は主催者ページから行えます。';
+        actions.innerHTML = "<button class=\"primary\" onclick=\"showPage('admin')\">主催者ページへ</button><button class=\"secondary\" onclick=\"showPage('events')\">公開ページを確認</button>";
+      }else if(mode==='event'){
+        title.textContent = 'イベント参加者マイページ';
+        body.textContent = 'イベント参加のみの場合、来場者向けの出店プロフィールやアイキャッチ提出欄は表示しません。申込状況と運営からのお知らせは下に表示されます。';
+        actions.innerHTML = "<button class=\"primary\" onclick=\"showPage('events')\">イベントを見る</button><button class=\"secondary\" onclick=\"scrollToMypageNotices()\">お知らせを見る</button>";
+      }else{
+        title.textContent = 'まだ申込はありません';
+        body.textContent = 'イベントやバザールに申込すると、このページに申込状況・確定連絡・運営からのお知らせが表示されます。';
+        actions.innerHTML = "<button class=\"primary\" onclick=\"showPage('events')\">募集中を見る</button><button class=\"secondary\" onclick=\"showPage('home')\">ホームへ</button>";
+      }
+    }
     function setMypageUwordVisibility(visible){
       var row = document.getElementById('mypage-uwordid-row');
       if(row) row.style.display = visible ? '' : 'none';
@@ -3134,20 +3203,14 @@
       return v==='uw' || v==='UW会員' || v==='ユーワード会員';
     }
     function syncMypageProfileFromLatestApplication(){
-      if(!CURRENT_USER_EMAIL) return;
-      var key = CURRENT_USER_EMAIL.toLowerCase();
-      var userApps = (APPLICATIONS||[]).filter(function(app){
-        return String(app.email||'').toLowerCase()===key;
-      });
+      var userApps = getCurrentUserApplications();
       var latest = userApps[0];
+      renderMypageAccessState(userApps);
       if(!latest) return;
       var latestEyecatch = userApps.reduce(function(found, app){
         return found || app.eyecatchImage || '';
       }, '');
-      var hasBazaarApp = userApps.some(function(app){
-        var event = (EVENTS||[]).find(function(e){return e.id===app.event;});
-        return !(app.category==='event' || isParticipantOnlyEvent(event));
-      });
+      var hasBazaarApp = userApps.some(isBazaarApplication);
       var hasUwordMemberBazaarApp = userApps.some(function(app){
         var event = (EVENTS||[]).find(function(e){return e.id===app.event;});
         var isBazaarApp = !(app.category==='event' || isParticipantOnlyEvent(event));
@@ -4705,18 +4768,7 @@
 
     function getCurrentUserApplicationForEvent(evId){
       if(!evId) return null;
-      var list = APPLICATIONS || [];
-      if(CURRENT_USER_EMAIL){
-        var hitByMail = list.find(function(app){
-          return app.event===evId && (app.email||'').toLowerCase()===CURRENT_USER_EMAIL.toLowerCase();
-        });
-        if(hitByMail) return hitByMail;
-      }
-      if(CURRENT_USER_ID){
-        var hitByPerson = list.find(function(app){return app.event===evId && app.person===CURRENT_USER_ID;});
-        if(hitByPerson) return hitByPerson;
-      }
-      return null;
+      return getCurrentUserApplications().find(function(app){return app.event===evId;}) || null;
     }
     function buildMypagePrepGridHtml(app, ev){
       if(isParticipantOnlyEvent(ev)){
@@ -4776,6 +4828,7 @@
 
     // マイページのイベントカードを EVENTS と紐付け
     function renderMypageEventCards(){
+      renderMypageAccessState();
       var nextUserEvents = {};
       var stateLabel = function(s, ev){var isEv=isParticipantOnlyEvent(ev);return s==='confirmed'?(isEv?'参加確定':'出店確定'):s==='applied'?(isEv?'参加申込中':'申込中'):'終了';};
       var stateClass = function(s){return s==='ended'?'mint':(s==='applied'?'orange':'');};
@@ -4789,15 +4842,12 @@
           nextUserEvents[evId] = normalizeState(CURRENT_USER_EVENTS[evId]);
         });
       }
-      if(CURRENT_USER_EMAIL){
-        (APPLICATIONS||[]).forEach(function(app){
-          if((app.email||'').toLowerCase() !== CURRENT_USER_EMAIL.toLowerCase()) return;
-          var st = app.status==='confirmed' ? 'confirmed' : 'applied';
-          if(nextUserEvents[app.event] !== 'confirmed'){
-            nextUserEvents[app.event] = st;
-          }
-        });
-      }
+      getCurrentUserApplications().forEach(function(app){
+        var st = app.status==='confirmed' ? 'confirmed' : 'applied';
+        if(nextUserEvents[app.event] !== 'confirmed'){
+          nextUserEvents[app.event] = st;
+        }
+      });
       var sortedEvents = Object.keys(nextUserEvents)
         .map(function(evId){return (EVENTS||[]).find(function(e){return e.id===evId;});})
         .filter(function(ev){return !!ev;})
