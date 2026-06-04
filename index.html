@@ -4098,13 +4098,21 @@
       document.querySelectorAll('#admin-applications .exhibitor-card.open').forEach(function(c){c.classList.remove('open');});
       if(!isOpen) card.classList.add('open');
     }
-    function setAppStatus(cardId,status,btn){
+    async function setAppStatus(cardId,status,btn){
       var card=document.getElementById(cardId);
       if(!card) return;
       var previousStatus = card.dataset.status || 'new';
+      var targetId = card.dataset.supabaseid || card.id || '';
+      var isSupabaseTarget = card.dataset.source==='supabase' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
+      if(isSupabaseTarget){
+        if(btn) btn.disabled = true;
+        var ok = await updateSupabaseApplicationStatus(card, status, previousStatus);
+        if(btn) btn.disabled = false;
+        if(!ok) return;
+      }
       card.dataset.status=status;
       card.querySelectorAll('.status-chip').forEach(function(b){b.classList.remove('active');});
-      btn.classList.add('active');
+      if(btn) btn.classList.add('active');
       var badge=card.querySelector('.app-status-badge');
       if(badge){
         badge.textContent=status==='new'?'新規':status==='confirmed'?(card.dataset.kind==='event'?'参加確定':'出店確定'):'保留';
@@ -4112,7 +4120,6 @@
         if(status==='confirmed') badge.classList.add('mint');
         else if(status==='hold') badge.classList.add('orange');
       }
-      updateSupabaseApplicationStatus(card, status, previousStatus);
       setTimeout(function(){
         filterAppsCombined();
         syncApplicationsFromCards();
@@ -4126,12 +4133,21 @@
     }
     async function updateSupabaseApplicationStatus(card, status, previousStatus){
       if(!card) return false;
-      if(CURRENT_USER_ROLE!=='admin') return false;
+      if(CURRENT_USER_ROLE!=='admin'){
+        showToast('管理者ログイン状態を確認できません。ログインし直してください。', 'warn');
+        return false;
+      }
       var sb = getSupabaseClient();
-      if(!sb) return false;
+      if(!sb){
+        showToast('Supabase接続を確認できません。', 'warn');
+        return false;
+      }
       var targetId = card.dataset.supabaseid || card.id || '';
       var looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
-      if(card.dataset.source!=='supabase' && !looksLikeUuid) return false;
+      if(card.dataset.source!=='supabase' && !looksLikeUuid){
+        showToast('この申込は試作用データのため、Supabase更新対象ではありません。', 'warn');
+        return false;
+      }
       try{
         var dbStatus = status==='confirmed' ? 'confirmed' : status==='hold' ? 'hold' : 'new';
         var res = await sb.from('applications')
