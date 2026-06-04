@@ -2238,7 +2238,6 @@
       };
     }
     async function loadAdminApplicationsFromSupabase(){
-      if(CURRENT_USER_ROLE!=='admin') return false;
       var sb = getSupabaseClient();
       if(!sb) return false;
       try{
