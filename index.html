@@ -4161,11 +4161,6 @@
         showToast('Supabase接続を確認できません。', 'warn');
         return false;
       }
-      var isAdmin = await refreshSupabaseAdminRole();
-      if(!isAdmin){
-        showToast('管理者ログイン状態を確認できません。マジックリンクでログインし直してください。', 'warn');
-        return false;
-      }
       var targetId = card.dataset.supabaseid || card.id || '';
       var looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
       if(!looksLikeUuid){
