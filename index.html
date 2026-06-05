@@ -2237,10 +2237,30 @@
         source: 'supabase'
       };
     }
-    async function loadAdminApplicationsFromSupabase(){
+    async function refreshSupabaseAdminRole(){
       var sb = getSupabaseClient();
       if(!sb) return false;
       try{
+        var current = await sb.auth.getSession();
+        var session = current && current.data && current.data.session;
+        if(!session || !session.user) return false;
+        await syncProfileFromSupabaseSession(session);
+        return CURRENT_USER_ROLE === 'admin';
+      }catch(e){
+        return false;
+      }
+    }
+    async function loadAdminApplicationsFromSupabase(options){
+      var opts = options && typeof options === 'object' ? options : {};
+      var silent = !!opts.silent;
+      var sb = getSupabaseClient();
+      if(!sb) return false;
+      try{
+        var isAdmin = await refreshSupabaseAdminRole();
+        if(!isAdmin){
+          if(!silent) showToast('管理者ログインを確認できません。マジックリンクでログインし直してください。', 'warn');
+          return false;
+        }
         var res = await sb.from('applications')
           .select('id,event_id,user_id,email,person_name,kana,shop_name,category,content,appeal,instagram,uword_id,attendee_count,status,eyecatch_image_url,admin_memo,created_at')
           .order('created_at', {ascending:false});
@@ -2255,10 +2275,10 @@
         renderApplications();
         syncPublicEventViews();
         renderMypageEventCards();
-        showToast('Supabaseの申込一覧を読み込みました', 'success');
+        if(!silent) showToast('Supabaseの申込一覧を読み込みました（'+(res.data||[]).length+'件）', 'success');
         return true;
       }catch(e){
-        showToast('Supabase申込一覧の読み込みに失敗しました', 'warn');
+        if(!silent) showToast('Supabase申込一覧エラー：' + ((e&&e.message)||'読み込み失敗'), 'warn');
         return false;
       }
     }
@@ -4090,6 +4110,9 @@
         searchEl.placeholder = kind==='event' ? '名前・ひらがなで検索' : '名前・屋号・ひらがなで検索';
       }
       filterAppsCombined();
+      loadAdminApplicationsFromSupabase({silent:false}).then(function(){
+        filterAppsCombined();
+      });
     }
     function toggleAppCard(id){
       var card=document.getElementById(id);
@@ -10252,7 +10275,7 @@ mikke.ruu2025@gmail.com`,
       tryLoginByUrlToken();
       initSupabaseAuthFromUrl()
         .then(loadPublicEventsFromSupabase)
-        .then(loadAdminApplicationsFromSupabase);
+        .then(function(){return loadAdminApplicationsFromSupabase({silent:true});});
     });
     // 即実行も保険で
     setTimeout(renderAll, 100);
