@@ -4184,11 +4184,10 @@
       }
       try{
         var dbStatus = status==='confirmed' ? 'confirmed' : status==='hold' ? 'hold' : 'new';
-        var res = await sb.from('applications')
-          .update({status: dbStatus, updated_at: new Date().toISOString()})
-          .eq('id', targetId)
-          .select('id,status')
-          .single();
+        var res = await sb.rpc('admin_update_application_status', {
+          p_application_id: targetId,
+          p_status: dbStatus
+        });
         if(res.error) throw res.error;
         var app = (APPLICATIONS||[]).find(function(item){return item.id===card.id;});
         if(app) app.status = dbStatus;
