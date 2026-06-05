@@ -1408,6 +1408,11 @@
 
       <section id="admin" class="page">
         <h1 class="page-title">主催者ページ</h1>
+        <div class="admin-note-box" id="admin-global-login-box" style="display:none;text-align:left;margin-bottom:14px">
+          <b>管理者ログインが必要です</b><br>
+          <span class="helper">申込者の個人情報を守るため、管理者メールのマジックリンクでログインしてください。</span>
+          <button class="primary" type="button" onclick="sendAdminMagicLink()" style="margin-top:10px">管理者ログインメールを送る</button>
+        </div>
         <button class="primary" onclick="openNewEventSheet()" style="width:100%;margin-bottom:16px"><svg class="icon"><use href="#i-calendar"/></svg>イベントを作成する</button>
 
         <div class="event-data-card">
@@ -2328,6 +2333,13 @@
         return apps.filter(function(app){ return app && app.source === 'supabase'; });
       }
       return apps;
+    }
+    function renderAdminLoginState(){
+      var needsLogin = !!getSupabaseClient() && CURRENT_USER_ROLE !== 'admin';
+      ['admin-login-box','admin-global-login-box'].forEach(function(id){
+        var el = document.getElementById(id);
+        if(el) el.style.display = needsLogin ? '' : 'none';
+      });
     }
     function seedRealTestDataOnce(){
       if(localStorage.getItem(REAL_SEED_KEY)==='1') return;
@@ -3688,7 +3700,7 @@
       if(!host) return;
       var visibleApplications = getAdminVisibleApplications();
       host.innerHTML = visibleApplications.map(buildApplicationCard).join('');
-      if(loginBox) loginBox.style.display = getSupabaseClient() && CURRENT_USER_ROLE !== 'admin' ? '' : 'none';
+      renderAdminLoginState();
       if(empty){
         empty.textContent = getSupabaseClient() && CURRENT_USER_ROLE !== 'admin'
           ? '管理者ログイン後に申込一覧が表示されます。'
@@ -10325,6 +10337,7 @@ mikke.ruu2025@gmail.com`,
       renderAdminFAQs();
       renderAdminTemplates();
       renderAdminSurveys();
+      renderAdminLoginState();
       updateMypageNoticeCount();
       syncPublicEventViews();
       saveAppState();
