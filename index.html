@@ -2243,7 +2243,10 @@
       try{
         var current = await sb.auth.getSession();
         var session = current && current.data && current.data.session;
-        if(!session || !session.user) return false;
+        if(!session || !session.user){
+          CURRENT_USER_ROLE = 'general';
+          return false;
+        }
         await syncProfileFromSupabaseSession(session);
         return CURRENT_USER_ROLE === 'admin';
       }catch(e){
@@ -2259,6 +2262,7 @@
         var isAdmin = await refreshSupabaseAdminRole();
         if(!isAdmin){
           if(!silent) showToast('管理者ログインを確認できません。マジックリンクでログインし直してください。', 'warn');
+          renderApplications();
           return false;
         }
         var res = await sb.from('applications')
@@ -2289,6 +2293,14 @@
         if(!silent) showToast('Supabase申込一覧エラー：' + ((e&&e.message)||'読み込み失敗'), 'warn');
         return false;
       }
+    }
+    function getAdminVisibleApplications(){
+      var apps = Array.isArray(APPLICATIONS) ? APPLICATIONS : [];
+      if(getSupabaseClient()){
+        if(CURRENT_USER_ROLE !== 'admin') return [];
+        return apps.filter(function(app){ return app && app.source === 'supabase'; });
+      }
+      return apps;
     }
     function seedRealTestDataOnce(){
       if(localStorage.getItem(REAL_SEED_KEY)==='1') return;
@@ -3646,8 +3658,14 @@
       var host = document.getElementById('admin-app-list');
       var empty = document.getElementById('admin-app-empty');
       if(!host) return;
-      host.innerHTML = (APPLICATIONS||[]).map(buildApplicationCard).join('');
-      if(empty) empty.style.display = APPLICATIONS.length ? 'none' : '';
+      var visibleApplications = getAdminVisibleApplications();
+      host.innerHTML = visibleApplications.map(buildApplicationCard).join('');
+      if(empty){
+        empty.textContent = getSupabaseClient() && CURRENT_USER_ROLE !== 'admin'
+          ? '管理者ログイン後に申込一覧が表示されます。'
+          : '申込データはありません。';
+        empty.style.display = visibleApplications.length ? 'none' : '';
+      }
       if(typeof injectAppEditDeleteButtons==='function') injectAppEditDeleteButtons();
       if(typeof injectFeePlanInfo==='function') injectFeePlanInfo();
       filterAppsCombined();
