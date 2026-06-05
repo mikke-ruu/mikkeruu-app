@@ -4134,7 +4134,9 @@
       if(!card) return;
       var previousStatus = card.dataset.status || 'new';
       var targetId = card.dataset.supabaseid || card.id || '';
-      var statusEvent = (EVENTS||[]).find(function(item){return item.id===card.dataset.event;});
+      var statusEvent = (EVENTS||[]).find(function(item){
+        return item.id===card.dataset.event || item.supabaseId===card.dataset.event;
+      });
       var isSupabaseEventApplication = !!(statusEvent && statusEvent.supabaseId && card.dataset.email);
       var isSupabaseTarget = card.dataset.source==='supabase'
         || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId)
@@ -4176,8 +4178,12 @@
       var targetId = card.dataset.supabaseid || card.id || '';
       var looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
       if(!looksLikeUuid){
-        var ev = (EVENTS||[]).find(function(item){return item.id===card.dataset.event;});
-        var evUuid = ev && ev.supabaseId ? ev.supabaseId : '';
+        var ev = (EVENTS||[]).find(function(item){
+          return item.id===card.dataset.event || item.supabaseId===card.dataset.event;
+        });
+        var eventValue = card.dataset.event || '';
+        var eventLooksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(eventValue);
+        var evUuid = ev && ev.supabaseId ? ev.supabaseId : (eventLooksLikeUuid ? eventValue : '');
         if(evUuid && card.dataset.email){
           try{
             var lookup = await sb.from('applications').select('id').eq('event_id', evUuid).eq('email', card.dataset.email).order('created_at', {ascending:false}).limit(1).maybeSingle();
