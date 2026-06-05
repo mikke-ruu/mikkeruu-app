@@ -2253,6 +2253,7 @@
           upsertById(APPLICATIONS, app);
         });
         renderApplications();
+        syncPublicEventViews();
         renderMypageEventCards();
         showToast('Supabaseの申込一覧を読み込みました', 'success');
         return true;
@@ -10180,7 +10181,11 @@ mikke.ruu2025@gmail.com`,
     }
 
     function syncApplicationCardsWithEvents(){
-      var valid = new Set((EVENTS||[]).map(function(e){return e.id;}));
+      var valid = new Set();
+      (EVENTS||[]).forEach(function(e){
+        if(e.id) valid.add(e.id);
+        if(e.supabaseId) valid.add(e.supabaseId);
+      });
       APPLICATIONS = (APPLICATIONS||[]).filter(function(app){return valid.has(app.event);});
       renderApplications();
       if(typeof filterAppsCombined==='function'){
