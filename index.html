@@ -4134,7 +4134,11 @@
       if(!card) return;
       var previousStatus = card.dataset.status || 'new';
       var targetId = card.dataset.supabaseid || card.id || '';
-      var isSupabaseTarget = card.dataset.source==='supabase' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
+      var statusEvent = (EVENTS||[]).find(function(item){return item.id===card.dataset.event;});
+      var isSupabaseEventApplication = !!(statusEvent && statusEvent.supabaseId && card.dataset.email);
+      var isSupabaseTarget = card.dataset.source==='supabase'
+        || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId)
+        || isSupabaseEventApplication;
       if(isSupabaseTarget){
         if(btn) btn.disabled = true;
         var ok = await updateSupabaseApplicationStatus(card, status, previousStatus);
