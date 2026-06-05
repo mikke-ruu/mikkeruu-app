@@ -2265,13 +2265,21 @@
           .select('id,event_id,user_id,email,person_name,kana,shop_name,category,content,appeal,instagram,uword_id,attendee_count,status,eyecatch_image_url,admin_memo,created_at')
           .order('created_at', {ascending:false});
         if(res.error) throw res.error;
-        (res.data||[]).map(mapSupabaseApplicationRow).forEach(function(app){
-          APPLICATIONS = (APPLICATIONS||[]).filter(function(local){
-            if(local.source==='supabase') return local.id!==app.id;
-            return !(String(local.email||'').toLowerCase()===String(app.email||'').toLowerCase() && local.event===app.event);
-          });
-          upsertById(APPLICATIONS, app);
+        var supabaseEventKeys = new Set();
+        (EVENTS||[]).forEach(function(ev){
+          if(ev && ev.supabaseId){
+            supabaseEventKeys.add(ev.id);
+            supabaseEventKeys.add(ev.supabaseId);
+          }
         });
+        var remoteApps = (res.data||[]).map(mapSupabaseApplicationRow);
+        remoteApps.forEach(function(app){
+          if(app.event) supabaseEventKeys.add(app.event);
+        });
+        APPLICATIONS = (APPLICATIONS||[]).filter(function(local){
+          return !supabaseEventKeys.has(local.event) && local.source!=='supabase';
+        });
+        remoteApps.forEach(function(app){ upsertById(APPLICATIONS, app); });
         renderApplications();
         syncPublicEventViews();
         renderMypageEventCards();
@@ -4194,6 +4202,7 @@
         markStateDirty();
         saveAppState();
         showToast(dbStatus==='confirmed' ? 'Supabaseでも確定に更新しました' : 'Supabaseの申込ステータスを更新しました', 'success');
+        loadAdminApplicationsFromSupabase({silent:true});
         return true;
       }catch(e){
         card.dataset.status = previousStatus || 'new';
