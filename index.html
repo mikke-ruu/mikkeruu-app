@@ -1602,6 +1602,11 @@
             <option value="party-no">交流会不参加</option>
             <option value="party-tbd">交流会未定</option>
           </select>
+          <div class="admin-note-box" id="admin-login-box" style="display:none;text-align:left">
+            <b>管理者ログインが必要です</b><br>
+            <span class="helper">申込者の個人情報を守るため、管理者メールのマジックリンクでログインしてください。</span>
+            <button class="primary" type="button" onclick="sendAdminMagicLink()" style="margin-top:10px">管理者ログインメールを送る</button>
+          </div>
           <div class="admin-app-list" id="admin-app-list"></div>
           <p class="helper" id="admin-app-empty" style="text-align:center;padding:24px 0">申込データはありません。</p>
         </div>
@@ -2251,6 +2256,28 @@
         return CURRENT_USER_ROLE === 'admin';
       }catch(e){
         return false;
+      }
+    }
+    function getAppBaseUrl(){
+      return location.origin + location.pathname;
+    }
+    async function sendAdminMagicLink(){
+      var sb = getSupabaseClient();
+      if(!sb){
+        showToast('Supabase接続を確認できません。', 'warn');
+        return;
+      }
+      try{
+        var redirectTo = getAppBaseUrl();
+        var res = await sb.auth.signInWithOtp({
+          email: 'mikke.ruu2025@gmail.com',
+          options: {emailRedirectTo: redirectTo}
+        });
+        if(res.error) throw res.error;
+        showToast('管理者メールにログインリンクを送りました。Gmailを確認してください。', 'success');
+      }catch(e){
+        var msg = (e && e.message) || '送信できませんでした';
+        showToast(msg.indexOf('rate') >= 0 ? 'メール送信上限に達しています。少し時間を置いて再度お試しください。' : 'ログインメール送信エラー：' + msg, 'warn');
       }
     }
     async function loadAdminApplicationsFromSupabase(options){
@@ -3657,9 +3684,11 @@
     function renderApplications(){
       var host = document.getElementById('admin-app-list');
       var empty = document.getElementById('admin-app-empty');
+      var loginBox = document.getElementById('admin-login-box');
       if(!host) return;
       var visibleApplications = getAdminVisibleApplications();
       host.innerHTML = visibleApplications.map(buildApplicationCard).join('');
+      if(loginBox) loginBox.style.display = getSupabaseClient() && CURRENT_USER_ROLE !== 'admin' ? '' : 'none';
       if(empty){
         empty.textContent = getSupabaseClient() && CURRENT_USER_ROLE !== 'admin'
           ? '管理者ログイン後に申込一覧が表示されます。'
