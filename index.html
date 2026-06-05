@@ -4168,6 +4168,21 @@
       }
       var targetId = card.dataset.supabaseid || card.id || '';
       var looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
+      if(!looksLikeUuid){
+        var ev = (EVENTS||[]).find(function(item){return item.id===card.dataset.event;});
+        var evUuid = ev && ev.supabaseId ? ev.supabaseId : '';
+        if(evUuid && card.dataset.email){
+          try{
+            var lookup = await sb.from('applications').select('id').eq('event_id', evUuid).eq('email', card.dataset.email).order('created_at', {ascending:false}).limit(1).maybeSingle();
+            if(lookup && lookup.data && lookup.data.id){
+              targetId = lookup.data.id;
+              card.dataset.supabaseid = targetId;
+              card.dataset.source = 'supabase';
+              looksLikeUuid = true;
+            }
+          }catch(e){}
+        }
+      }
       if(card.dataset.source!=='supabase' && !looksLikeUuid){
         showToast('この申込は試作用データのため、Supabase更新対象ではありません。', 'warn');
         return false;
@@ -6366,21 +6381,16 @@ mikke.ruu2025@gmail.com`,
     // setAppStatus を拡張（既存をオーバーライド）：マイページにも反映
     (function(){
       var origSetAppStatus=window.setAppStatus;
-      window.setAppStatus=function(cardId,status,btn){
-        if(origSetAppStatus) origSetAppStatus(cardId,status,btn);
+      window.setAppStatus=async function(cardId,status,btn){
+        if(origSetAppStatus) await origSetAppStatus(cardId,status,btn);
         var card = document.getElementById(cardId);
+        if(card && card.dataset.status !== status) return;
         if(card && CURRENT_USER_EMAIL && (card.dataset.email||'').toLowerCase()===CURRENT_USER_EMAIL.toLowerCase()){
           var evId = card.dataset.event;
           if(evId){
             CURRENT_USER_EVENTS[evId] = status==='confirmed' ? 'confirmed' : 'applied';
             renderMypageEventCards();
           }
-        }
-        // app-1（田中花子）は仮にマイページHanakoさんと同一視せず、トーストで状態変化を通知
-        if(status==='confirmed'){
-          showToast('「出店確定」にしました — 出店者のマイページに反映されます','success');
-        } else if(status==='hold'){
-          showToast('「保留」にしました','warn');
         }
       };
     })();
