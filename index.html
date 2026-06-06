@@ -1227,16 +1227,10 @@
       <section id="complete" class="page">
         <div class="card content" style="text-align:center;padding:42px 24px">
           <div style="width:74px;height:74px;border-radius:50%;display:grid;place-items:center;margin:0 auto 16px;background:var(--soft);color:var(--ruu)"><svg class="icon" style="width:40px;height:40px"><use href="#i-check"/></svg></div>
-          <h1 class="event-title">お申し込みが完了しました！</h1>
-          <p class="helper">運営が内容を確認します。</p>
-          <div class="admin-note-box" id="complete-login-box" style="text-align:left;margin-top:14px;display:none">
-            <b>マイページ用ログインURL（テスト表示）</b><br>
-            <span class="helper" id="complete-login-mail" style="display:block;margin-top:6px"></span>
-            <a id="complete-login-link" href="#" target="_blank" rel="noopener" style="display:block;margin-top:6px;color:var(--ruu);font-size:12px;line-height:1.5;word-break:break-all"></a>
-            <button class="secondary" type="button" onclick="copyCompleteLoginUrl()" style="margin-top:8px">ログインURLをコピー</button>
-          </div>
+          <h1 class="event-title">お申込みありがとうございました</h1>
+          <p class="helper">運営が内容を確認します。マイページから申込状況をご確認いただけます。</p>
 
-          <a class="primary" style="margin-top:18px" href="#mypage" onclick="showPage('mypage')">マイページへ</a>
+          <a class="primary" style="margin-top:18px" href="#mypage" onclick="showPage('mypage')">マイページで確認する</a>
         </div>
       </section>
 
@@ -1324,7 +1318,7 @@
             </div>
             <div class="home-expanded-actions">
               <a class="icon-action" href="#party" onclick="showPage('party')"><svg class="icon"><use href="#i-utensils"/></svg>交流会参加</a>
-              <a class="icon-action" href="javascript:void(0)" onclick="scrollToMypageNotices()"><svg class="icon"><use href="#i-bell"/></svg>運営からのお知らせ<span id="mypage-notice-count-1" class="badge orange" style="margin-left:6px;font-size:10px;padding:1px 7px;display:none">0</span></a>
+              <a class="icon-action" href="javascript:void(0)" onclick="scrollToMypageNotices()"><svg class="icon"><use href="#i-bell"/></svg>お知らせ<span id="mypage-notice-count-1" class="badge orange" style="margin-left:6px;font-size:10px;padding:1px 7px;display:none">0</span></a>
             </div>
             
           </div>
@@ -1381,7 +1375,7 @@
         </div>
 
         <!-- 個人情報（非公開） -->
-        <div class="mp-card">
+        <div class="mp-card" style="margin-top:14px">
           <div class="mp-card-header private">
             <span class="mp-area-label private"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>個人情報（非公開）</span>
             <span class="mp-area-note">あなただけが見れます</span>
@@ -1898,6 +1892,7 @@
         <button onclick="showPageFromDrawer('faq')"><svg class="icon"><use href="#i-help"/></svg>FAQ</button>
         <button onclick="showPageFromDrawer('mypage')"><svg class="icon"><use href="#i-user"/></svg>マイページ</button>
         <button onclick="openDisplaySettings()"><svg class="icon"><use href="#i-settings"/></svg>文字サイズ</button>
+        <button onclick="openShareApp()"><svg class="icon"><use href="#i-share"/></svg>このアプリを共有 / QR</button>
         <button class="admin-entry" onclick="showPageFromDrawer('admin')" aria-label="主催者ページ"><svg class="icon"><use href="#i-settings"/></svg></button>
       </div>
     </aside>
@@ -3810,7 +3805,7 @@
       if(noticeHelper){
         noticeHelper.textContent = hasBazaarApp ? '出店者向け・イベント別・あなた宛ての連絡はここに届きます。' : 'イベント別・あなた宛ての連絡はここに届きます。';
       }
-      var showGuide = mode!=='bazaar';
+      var showGuide = mode==='admin-empty' || mode==='empty';
       if(!guide || !title || !body || !actions) return;
       guide.classList.toggle('show', showGuide);
       if(!showGuide) return;
@@ -4234,15 +4229,6 @@
       renderEventList();
       renderMypageEventCards();
       (function(){ var dashEv = typeof getCurrentDashboardEvent==='function' ? getCurrentDashboardEvent() : null; if(dashEv && typeof applyEventData==='function') applyEventData(dashEv.key); })();
-      var token = issueLoginToken(CURRENT_USER_EMAIL, CURRENT_USER_ID);
-      var loginUrl = buildMagicLoginUrl(token);
-      showCompleteLoginInfo(CURRENT_USER_EMAIL, loginUrl);
-      (function(){
-        var msgEl = document.querySelector('#complete .event-title');
-        if(msgEl) msgEl.textContent = data.isParticipantEvent ? '参加申し込みが完了しました！' : '出店申し込みが完了しました！';
-        var helperEl = document.querySelector('#complete .helper');
-        if(helperEl) helperEl.textContent = data.isParticipantEvent ? '内容を確認してご連絡いたします。' : '運営が内容を確認します。';
-      })();
       showPage('complete');
       clearApplyDraftForEvent(data.eventId);
       applyStep = 1;
@@ -4415,8 +4401,47 @@
     function openModal(title,cat,desc,img){openExhibitorModal(null,title,'未入力',cat,cat,desc,img,'#','#')}
     function openExhibitorModal(event,title,uwordId,cat,content,desc,img,instagram,uwordUrl){if(event){event.stopPropagation()}document.getElementById('modal-title').textContent=title;document.getElementById('modal-cat').textContent=cat;document.getElementById('modal-uword').textContent='ユーワードID：'+uwordId;document.getElementById('modal-content').textContent='出店内容：'+content;document.getElementById('modal-desc').textContent=desc;document.getElementById('modal-img').src=img;document.getElementById('modal-instagram').href=instagram||'#';document.getElementById('modal-uword-link').href=uwordUrl||'#';document.getElementById('modal').classList.add('open');var card=document.querySelector('#modal .modal-card');if(card){card.scrollTop=0}}
     function closeModal(event){if(event && event.target && event.target.id!=='modal') return;document.getElementById('modal').classList.remove('open')}
-    function openInstallGuide(){document.getElementById('install-modal').classList.add('open');var card=document.querySelector('#install-modal .modal-card');if(card){card.scrollTop=0}}
+    function openInstallGuide(){ openShareApp(); }
     function closeInstallGuide(){document.getElementById('install-modal').classList.remove('open')}
+    function getShareAppUrl(){ return (typeof getAppBaseUrl==='function') ? getAppBaseUrl() : (location.origin + location.pathname); }
+    function openShareApp(){
+      if(typeof closeDrawer==='function') closeDrawer();
+      var url = getShareAppUrl();
+      var qr = 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data='+encodeURIComponent(url);
+      var body = ''+
+        '<div style="text-align:center">'+
+          '<img src="'+qr+'" alt="QRコード" style="width:200px;height:200px;border-radius:14px;border:1px solid var(--line);padding:8px;background:#fff">'+
+          '<p class="helper" style="margin:10px 0 2px">QRを読み取ると、このアプリが開きます。</p>'+
+          '<p class="helper" style="font-size:11px;margin:0 0 4px">チラシやLINEで「ここから申込・確認できます」とご案内ください。</p>'+
+          '<p style="font-size:11px;color:var(--sub);word-break:break-all;margin:0 0 14px">'+h(url)+'</p>'+
+          '<button class="primary" type="button" onclick="shareAppLink()" style="width:100%;margin-bottom:8px">共有する</button>'+
+          '<button class="secondary" type="button" onclick="copyShareAppUrl()" style="width:100%">URLをコピー</button>'+
+        '</div>'+
+        '<details class="app-confirm-details" style="margin-top:14px"><summary>ホーム画面に追加する方法（アプリのように使う）</summary>'+
+          '<div style="font-size:12px;color:var(--sub);line-height:1.7;padding:8px 2px">'+
+            '<p style="margin:0 0 8px"><b>iPhone（Safari）</b><br>下の「共有」ボタン <span class="inline-action-icon"><svg class="icon"><use href="#i-share"/></svg></span> → 「ホーム画面に追加」</p>'+
+            '<p style="margin:0 0 8px"><b>Android（Chrome）</b><br>右上「⋮」メニュー → 「ホーム画面に追加」/「アプリをインストール」</p>'+
+            '<p style="margin:6px 0 0">追加すると、アイコンからアプリのように一発で開けます。表示名は端末で少し違います。</p>'+
+          '</div>'+
+        '</details>';
+      openSheet('このアプリを共有', '', body);
+    }
+    function shareAppLink(){
+      var url = getShareAppUrl();
+      if(navigator.share){
+        navigator.share({title:'Mikke ruu', text:'Mikke ruu｜イベント申込・確認', url:url}).catch(function(){});
+      } else {
+        copyShareAppUrl();
+      }
+    }
+    function copyShareAppUrl(){
+      var url = getShareAppUrl();
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(url).then(function(){showToast('URLをコピーしました','success');}, function(){showToast('コピーできませんでした','warn');});
+      } else {
+        showToast('URL: '+url, 'success');
+      }
+    }
     function copyCurrentUrl(event){
       if(event){event.stopPropagation()}
       var url = location.href;
@@ -5631,7 +5656,7 @@
           '<div class="prep-item done"><svg class="icon"><use href="#i-check"/></svg>参加申込済</div>'+
           '<div class="prep-item done"><svg class="icon"><use href="#i-user"/></svg>参加人数 '+count+'名</div>'+
           '<div class="prep-item done"><svg class="icon"><use href="#i-file"/></svg>'+h(feeLabel)+'</div>'+
-          '<div class="prep-item '+(hasRequest?'done':'warn')+'"><svg class="icon"><use href="#i-bell"/></svg>'+(hasRequest?'運営要望あり':'運営要望なし')+'</div>';
+          (hasRequest ? '<div class="prep-item done"><svg class="icon"><use href="#i-bell"/></svg>運営要望あり</div>' : '');
       }
       var payText = '当日支払い予定';
       var payCls = 'warn';
@@ -5654,7 +5679,7 @@
       var plan = getApplyFeePlanByEvent(ev ? ev.id : '', app.feeplan || '');
       var feeLabel = plan ? (plan.label + ' ¥' + (parseInt(plan.yen,10)||0).toLocaleString()) : '未設定';
       if(isEv){
-        return '<details class="app-confirm-details"><summary>申込内容を確認</summary>'+
+        return '<details class="app-confirm-details" open><summary>申込内容</summary>'+
           '<div class="app-confirm-grid">'+
           '<div class="app-confirm-row"><span>お名前</span><span>'+h(app.personname||'-')+'</span></div>'+
           '<div class="app-confirm-row"><span>参加人数</span><span>'+(parseInt(app.attendeeCount||0,10)||1)+'名</span></div>'+
@@ -5662,7 +5687,7 @@
           (app.adminRequest?'<div class="app-confirm-row full"><span>運営への連絡</span><span>'+h(app.adminRequest)+'</span></div>':'')+
           '</div></details>';
       }else{
-        return '<details class="app-confirm-details"><summary>申込内容を確認・編集</summary>'+
+        return '<details class="app-confirm-details" open><summary>申込内容・編集</summary>'+
           '<div class="app-confirm-grid">'+
           '<div class="app-confirm-row"><span>屋号</span><span>'+h(app.shopname||'-')+'</span></div>'+
           '<div class="app-confirm-row"><span>ジャンル</span><span>'+h(getApplyCategoryLabel(app.category)||'-')+'</span></div>'+
@@ -5681,7 +5706,7 @@
     function renderMypageEventCards(){
       renderMypageAccessState();
       var nextUserEvents = {};
-      var stateLabel = function(s, ev){var isEv=isParticipantOnlyEvent(ev);return s==='confirmed'?(isEv?'参加確定':'出店確定'):s==='applied'?(isEv?'参加申込中':'申込中'):'終了';};
+      var stateLabel = function(s, ev){var isEv=isParticipantOnlyEvent(ev);return s==='confirmed'?(isEv?'確定':'出店確定'):s==='applied'?(isEv?'申込中':'申込中'):'終了';};
       var stateClass = function(s){return s==='ended'?'mint':(s==='applied'?'orange':'');};
       var normalizeState = function(s){
         if(s==='confirmed' || s==='applied' || s==='ended') return s;
@@ -5736,8 +5761,8 @@
         }
         var isEvKind = isParticipantOnlyEvent(ev);
         var kindBadge = isEvKind
-          ? '<span class="badge mint" style="font-size:10px;padding:2px 8px">イベント参加</span>'
-          : '<span class="badge orange" style="font-size:10px;padding:2px 8px">バザール</span>';
+          ? '<span class="badge mint" style="font-size:11px;padding:2px 9px">イベント</span>'
+          : '<span class="badge orange" style="font-size:11px;padding:2px 9px">バザール</span>';
         var miniTitle = card.querySelector('.mini-title');
         if(miniTitle){
           miniTitle.innerHTML = '<span class="badge '+stateClass(state)+'">'+stateLabel(state, ev)+'</span>'+kindBadge+ev.name;
@@ -5746,13 +5771,15 @@
         if(badge){
           badge.textContent = stateLabel(state, ev);
           badge.className = 'badge'+(stateClass(state)?' '+stateClass(state):'');
+          badge.style.fontSize = '11px';
+          badge.style.padding = '2px 9px';
           // 全カード（大）にも種別バッジを追加
           var existingKind = card.querySelector('.mp-kind-badge');
           if(!existingKind){
             var kb = document.createElement('span');
             kb.className = 'mp-kind-badge badge '+(isEvKind?'mint':'orange');
-            kb.style.cssText = 'font-size:10px;padding:2px 8px';
-            kb.textContent = isEvKind ? 'イベント参加' : 'バザール';
+            kb.style.cssText = 'font-size:11px;padding:2px 9px';
+            kb.textContent = isEvKind ? 'イベント' : 'バザール';
             badge.parentNode.insertBefore(kb, badge.nextSibling);
           }
         }
@@ -5799,6 +5826,12 @@
         if(isParticipantOnlyEvent(ev)){
           var partyLink = detailEl.querySelector('a[href="#party"]');
           if(partyLink) partyLink.style.display = 'none';
+        }
+        // アクション欄：表示中ボタン数に合わせて列数を調整（1個のときに細長くならないように）
+        var actionsEl = detailEl.querySelector('.home-expanded-actions');
+        if(actionsEl){
+          var visibleActions = Array.prototype.filter.call(actionsEl.querySelectorAll('.icon-action'), function(a){return a.style.display!=='none';});
+          actionsEl.style.gridTemplateColumns = 'repeat('+Math.max(1, Math.min(visibleActions.length, 3))+',1fr)';
         }
         card.dataset.evid = ev.id;
       });
