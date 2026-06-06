@@ -1538,6 +1538,7 @@
             <button onclick="openEventListForKind('bazaar')"><svg class="icon"><use href="#i-book"/></svg>バザール一覧</button>
             <button onclick="openAllAppsPanel()"><svg class="icon"><use href="#i-user"/></svg>出店申込一覧</button>
             <button onclick="toggleAdminPanel('admin-eyecatch')"><svg class="icon"><use href="#i-camera"/></svg>アイキャッチ一覧</button>
+            <button onclick="openManualExhibitorSheet()"><svg class="icon"><use href="#i-user"/></svg>出店者を手動登録</button>
           </div>
 
           <p class="admin-menu-label"><svg class="icon" style="width:13px;height:13px;color:var(--mint)"><use href="#i-calendar"/></svg>イベント</p>
@@ -1834,6 +1835,12 @@
             <label style="font-size:11px;font-weight:900;color:var(--sub)">ミッケイベント概要書及び注意事項（自由記入）
               <textarea class="input" id="org-term-policy-event" rows="12" style="resize:vertical"></textarea>
             </label>
+
+            <p class="filter-label" style="margin-top:14px;margin-bottom:0">▼ 管理者パスワード変更</p>
+            <label style="font-size:11px;font-weight:900;color:var(--sub)">現在のパスワード<input class="input" id="org-pwd-current" type="password" placeholder="••••••••" autocomplete="current-password"></label>
+            <label style="font-size:11px;font-weight:900;color:var(--sub)">新しいパスワード<input class="input" id="org-pwd-new" type="password" placeholder="8文字以上推奨" autocomplete="new-password"></label>
+            <label style="font-size:11px;font-weight:900;color:var(--sub)">新しいパスワード（確認）<input class="input" id="org-pwd-confirm" type="password" placeholder="もう一度入力" autocomplete="new-password"></label>
+            <button class="secondary" onclick="changeAdminPassword()" style="margin-top:2px">パスワードを変更する</button>
 
             <p class="filter-label" style="margin-top:14px;margin-bottom:0">▼ デザイン（将来：シリーズ展開時）</p>
             <label style="font-size:11px;font-weight:900;color:var(--sub)">テーマカラー<input class="input" id="org-theme-color" type="color" value="#ED5F7D" style="height:46px"></label>
@@ -2460,6 +2467,81 @@
       }
       return apps;
     }
+    function openManualExhibitorSheet(){
+      var dashEv = typeof getCurrentDashboardEvent==='function' ? getCurrentDashboardEvent() : null;
+      if(!dashEv||!dashEv.key){showToast('対象バザールを選んでください','warn');return;}
+      var ev = (EVENTS||[]).find(function(e){return e.id===dashEv.key;});
+      if(!ev){showToast('イベント情報が見つかりません','warn');return;}
+      var feeOpts = ev.feeOptions||[];
+      var feeHtml = feeOpts.length>0
+        ? '<select class="input" id="mr-fee" style="margin-top:4px">'+feeOpts.map(function(f){
+            return '<option value="'+h(f.label)+'">'+h(f.label)+'（¥'+(f.yen||0).toLocaleString()+'）</option>';
+          }).join('')+'</select>'
+        : '<input class="input" id="mr-fee" placeholder="例：UW会員" style="margin-top:4px">';
+      var sid = ev.supabaseId||'';
+      var body = '<div style="display:flex;flex-direction:column;gap:14px">'
+        +'<label style="font-size:11px;font-weight:900;color:var(--sub)">屋号 / ショップ名 <span style="color:var(--ruu)">必須</span>'
+        +'<input class="input" id="mr-shop" placeholder="例：ハンドメイドサクラ" style="margin-top:4px"></label>'
+        +'<label style="font-size:11px;font-weight:900;color:var(--sub)">担当者名（省略可）'
+        +'<input class="input" id="mr-name" placeholder="例：田中 花子" style="margin-top:4px"></label>'
+        +'<label style="font-size:11px;font-weight:900;color:var(--sub)">カテゴリー'
+        +'<select class="input" id="mr-category" style="margin-top:4px">'
+        +'<option value="retail">物販</option>'
+        +'<option value="food">飲食</option>'
+        +'<option value="session">セッション</option>'
+        +'<option value="treatment">施術</option>'
+        +'</select></label>'
+        +'<label style="font-size:11px;font-weight:900;color:var(--sub)">出店料区分'
+        +feeHtml+'</label>'
+        +'<label style="font-size:11px;font-weight:900;color:var(--sub)">メールアドレス（省略可）'
+        +'<input class="input" id="mr-email" type="email" placeholder="例：hanako@example.com（入れるとログイン・確定メール可）" style="margin-top:4px"></label>'
+        +'<label style="font-size:11px;font-weight:900;color:var(--sub)">メモ（任意）'
+        +'<input class="input" id="mr-memo" placeholder="例：LINE招待済み、備考など" style="margin-top:4px"></label>'
+        +'<button class="primary" type="button" onclick="submitManualExhibitor(\''+ev.id+'\',\''+sid+'\')" style="margin-top:4px">出店確定で登録する</button>'
+        +'</div>';
+      openSheet('出店者を手動登録', dashEv.label, body);
+    }
+    async function submitManualExhibitor(localEventId, supabaseEventId){
+      var shop = ((document.getElementById('mr-shop')||{}).value||'').trim();
+      var name = ((document.getElementById('mr-name')||{}).value||'').trim();
+      var category = (document.getElementById('mr-category')||{}).value||'retail';
+      var fee = ((document.getElementById('mr-fee')||{}).value||'').trim();
+      var email = ((document.getElementById('mr-email')||{}).value||'').trim();
+      var memo = ((document.getElementById('mr-memo')||{}).value||'').trim();
+      if(!shop){showToast('屋号を入力してください','warn');return;}
+      var placeholderEmail = email || ('manual_'+Date.now()+'@mikkeruu.local');
+      var id = 'manual-'+Date.now();
+      var appData = {id:id,eventId:localEventId,shopName:shop,personName:name||shop,
+        category:category,feeLabel:fee,memo:memo,email:placeholderEmail,status:'confirmed',isManual:true};
+      if(typeof APPLICATIONS!=='undefined') APPLICATIONS.push(appData);
+      if(typeof renderApplications==='function') renderApplications();
+      if(typeof markStateDirty==='function') markStateDirty();
+      if(typeof saveAppState==='function') saveAppState();
+      var sb = typeof getSupabaseClient==='function' ? getSupabaseClient() : null;
+      if(sb && supabaseEventId){
+        var content = fee ? '出店料区分：'+fee : '';
+        if(memo) content = content ? content+' / メモ：'+memo : 'メモ：'+memo;
+        var res = await sb.from('applications').insert({
+          event_id: supabaseEventId,
+          email: placeholderEmail,
+          person_name: name||shop,
+          shop_name: shop,
+          category: category,
+          content: content||null,
+          status: 'confirmed',
+        });
+        if(res.error){
+          showToast('Supabase保存エラー：'+res.error.message,'warn');
+        } else {
+          showToast(shop+' を出店確定で登録しました','success');
+          if(typeof loadAdminApplicationsFromSupabase==='function') loadAdminApplicationsFromSupabase({silent:true});
+        }
+      } else {
+        showToast(shop+' をローカルに登録しました','success');
+      }
+      var shEl = document.getElementById('sheet');
+      if(shEl) shEl.classList.remove('open');
+    }
     function renderAdminLoginState(){
       var needsLogin = !!getSupabaseClient() && CURRENT_USER_ROLE !== 'admin';
       ['admin-login-box','admin-global-login-box'].forEach(function(id){
@@ -2661,8 +2743,8 @@
       }, 80);
     }
     // 管理画面パスワード保護
-    var ADMIN_PASSWORD = 'mikke2026'; // デモ用パスワード
-    var ADMIN_PASSWORD_REQUIRED = false; // 実機検証中は管理画面を直接開く
+    var ADMIN_PASSWORD = (function(){ try{ return localStorage.getItem('mikke_admin_pwd')||'mikke2026'; }catch(e){ return 'mikke2026'; } })();
+    var ADMIN_PASSWORD_REQUIRED = true;
     var __adminAuthed = false;
     function showAdminLogin(){
       openSheet('主催者ページにログイン','安全のためパスワードが必要です',
@@ -2671,7 +2753,6 @@
           '<p class="helper" style="margin:0">主催者だけが操作できる画面です。<br>パスワードを入力してください。</p>'+
         '</div>'+
         '<label style="font-size:11px;font-weight:900;color:var(--sub)">パスワード<input class="input" id="admin-pwd" type="password" placeholder="••••••••" autocomplete="current-password" autofocus></label>'+
-        '<p class="helper" style="font-size:10px;color:#c0b0d0;margin-top:-4px">＊デモ用パスワード：mikke2026</p>'+
         '<div class="sheet-actions">'+
           '<button class="primary" onclick="tryAdminLogin()">ログイン</button>'+
           '<button class="secondary" onclick="closeSheet();showPage(\'home\',true)">キャンセル</button>'+
@@ -2704,6 +2785,21 @@
       sessionStorage.removeItem('mikke_admin_auth');
       showToast('ログアウトしました');
       showPage('home', true);
+    }
+    function changeAdminPassword(){
+      var cur = ((document.getElementById('org-pwd-current')||{}).value||'').trim();
+      var nw  = ((document.getElementById('org-pwd-new')||{}).value||'').trim();
+      var cnf = ((document.getElementById('org-pwd-confirm')||{}).value||'').trim();
+      if(!cur||!nw||!cnf){showToast('すべての欄を入力してください','warn');return;}
+      if(cur !== ADMIN_PASSWORD){showToast('現在のパスワードが違います','warn');return;}
+      if(nw.length < 6){showToast('新しいパスワードは6文字以上にしてください','warn');return;}
+      if(nw !== cnf){showToast('新しいパスワードが一致しません','warn');return;}
+      ADMIN_PASSWORD = nw;
+      try{localStorage.setItem('mikke_admin_pwd', nw);}catch(e){}
+      ['org-pwd-current','org-pwd-new','org-pwd-confirm'].forEach(function(id){
+        var el=document.getElementById(id); if(el) el.value='';
+      });
+      showToast('パスワードを変更しました','success');
     }
 
     function showPage(id, rootNav){
