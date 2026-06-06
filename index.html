@@ -1064,6 +1064,7 @@
                 <span id="apply-event-overview-price">価格：-</span>
                 <span id="apply-event-overview-content">イベント内容：-</span>
               </div>
+              <div id="apply-bazaar-detail" class="info" style="display:none;gap:8px;margin-bottom:14px"></div>
               <div id="apply-basic-step1">
                 <h2>まずは基本情報を教えてください</h2>
                 <input class="input" id="apply-name" placeholder="お名前（フルネーム）">
@@ -2206,6 +2207,7 @@
         slug: row.slug || '',
         kind: row.kind === 'event' ? 'イベント' : 'バザール',
         content: row.detail || '',
+        detail: row.detail || '',
         name: row.title || row.short_title || '名称未設定',
         date: date,
         dayOfWeek: date ? computeDayOfWeek(date) : '',
@@ -2216,9 +2218,13 @@
         mapUrl: row.map_url || '',
         image: row.cover_image_url || '',
         coverImage: row.cover_image_url || '',
+        flyerImages: Array.isArray(row.gallery_image_urls) ? row.gallery_image_urls : [],
         deadline: row.application_deadline || '',
         capacity: row.capacity || 0,
         lineUrl: row.line_group_url || '',
+        lineGroupUrl: row.line_group_url || '',
+        feeOptions: Array.isArray(row.fee_options) ? row.fee_options : [],
+        capacities: row.capacities || {},
         status: row.status === 'draft' ? 'draft' : 'public',
         party: {enabled:false},
         source: 'supabase'
@@ -2229,9 +2235,16 @@
       if(!sb) return false;
       try{
         var res = await sb.from('events')
-          .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,detail,cover_image_url,line_group_url,capacity,application_deadline')
+          .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,detail,cover_image_url,gallery_image_urls,line_group_url,capacity,application_deadline,fee_options,capacities')
           .in('status', ['public','closed','past'])
           .order('starts_at', {ascending:true});
+        // 新カラム未追加の旧DB向けフォールバック
+        if(res.error && res.error.message && res.error.message.indexOf('does not exist')!==-1){
+          res = await sb.from('events')
+            .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,detail,cover_image_url,line_group_url,capacity,application_deadline')
+            .in('status', ['public','closed','past'])
+            .order('starts_at', {ascending:true});
+        }
         if(res.error) throw res.error;
         (res.data||[]).forEach(function(row){ upsertById(EVENTS, mapSupabaseEventRow(row)); });
         normalizeEventDefaults();
@@ -2277,6 +2290,205 @@
         createdAt: datePartFromIso(row.created_at),
         source: 'supabase'
       };
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Supabase Storage ヘルパー
+       ───────────────────────────────────────────────────── */
+    // ファイルを event-images バケットにアップロードしてパブリックURLを返す
+    // 失敗時は null を返す
+    async function uploadFileToStorage(path, file){
+      var sb = getSupabaseClient();
+      if(!sb || !file) return null;
+      try{
+        var res = await sb.storage.from('event-images').upload(path, file, {upsert:true, contentType:file.type||'image/jpeg'});
+        if(res.error) throw res.error;
+        var urlRes = sb.storage.from('event-images').getPublicUrl(path);
+        return (urlRes.data && urlRes.data.publicUrl) ? urlRes.data.publicUrl : null;
+      }catch(e){
+        console.warn('Storage upload failed ['+path+']:', e.message||e);
+        return null;
+      }
+    }
+
+    // イベントを Supabase events テーブルに保存（insert or update）
+    // 成功時は true、失敗時は false を返す
+    async function saveEventToSupabase(ev){
+      var sb = getSupabaseClient();
+      if(!sb) return false;
+      var startsAt = ev.date ? ev.date+'T'+(ev.startTime||'10:00')+':00+09:00' : null;
+      var endsAt   = ev.date ? ev.date+'T'+(ev.endTime  ||'17:00')+':00+09:00' : null;
+      var payload = {
+        slug:                 ev.id,
+        kind:                 ev.kind === 'バザール' ? 'bazaar' : 'event',
+        status:               ev.status || 'draft',
+        title:                ev.name || '',
+        short_title:          ev.shortName || ev.name || '',
+        starts_at:            startsAt,
+        ends_at:              endsAt,
+        venue:                ev.venue || '',
+        address:              ev.address || '',
+        map_url:              ev.mapUrl || '',
+        detail:               ev.detail || ev.content || '',
+        cover_image_url:      ev.coverImage || '',
+        gallery_image_urls:   ev.flyerImages || [],
+        line_group_url:       ev.lineGroupUrl || ev.lineUrl || '',
+        capacity:             ev.capacity || 0,
+        application_deadline: ev.deadline || null,
+        fee_options:          ev.feeOptions || [],
+        capacities:           ev.capacities || {}
+      };
+      try{
+        if(ev.supabaseId){
+          // 既存イベントを更新
+          var res = await sb.from('events').update(payload).eq('id', ev.supabaseId);
+          if(res.error) throw res.error;
+        } else {
+          // 新規挿入（admin は SELECT も可なので id を読み返す）
+          var res2 = await sb.from('events').insert(payload).select('id').single();
+          if(res2.error) throw res2.error;
+          if(res2.data && res2.data.id){
+            ev.supabaseId = res2.data.id;
+            ev.source = 'supabase';
+          }
+        }
+        return true;
+      }catch(e){
+        console.warn('Supabase event save failed:', e.message||e);
+        return false;
+      }
+    }
+
+    // ログインユーザーが自分のアイキャッチ URL を Supabase に更新する
+    async function updateMyEyecatchInSupabase(imageUrl, eventSupabaseId){
+      var sb = getSupabaseClient();
+      if(!sb) return false;
+      try{
+        var params = {p_image_url: imageUrl};
+        if(eventSupabaseId) params.p_event_id = eventSupabaseId;
+        var res = await sb.rpc('update_my_eyecatch', params);
+        if(res.error) throw res.error;
+        return true;
+      }catch(e){
+        console.warn('update_my_eyecatch failed:', e.message||e);
+        return false;
+      }
+    }
+
+    // 管理者がアイキャッチを代理更新する（申込の supabaseId を使う）
+    async function adminUpdateEyecatchInSupabase(applicationSupabaseId, imageUrl){
+      var sb = getSupabaseClient();
+      if(!sb || !applicationSupabaseId) return false;
+      try{
+        var res = await sb.rpc('admin_update_eyecatch', {p_application_id: applicationSupabaseId, p_image_url: imageUrl});
+        if(res.error) throw res.error;
+        return true;
+      }catch(e){
+        console.warn('admin_update_eyecatch failed:', e.message||e);
+        return false;
+      }
+    }
+
+    // アルバムを Supabase に挿入。成功したら Supabase UUID を返す
+    async function saveAlbumToSupabase(album){
+      var sb = getSupabaseClient();
+      if(!sb) return null;
+      try{
+        var ev = album.eventKey ? (EVENTS||[]).find(function(x){return x.id===album.eventKey;}) : null;
+        var payload = {
+          title:          album.title || '',
+          subtitle:       album.subtitle || '',
+          type:           album.type || 'event',
+          event_id:       ev && ev.supabaseId ? ev.supabaseId : null,
+          cover_photo_url: ''
+        };
+        var res = await sb.from('albums').insert(payload).select('id').single();
+        if(res.error) throw res.error;
+        return res.data && res.data.id ? res.data.id : null;
+      }catch(e){
+        console.warn('saveAlbumToSupabase failed:', e.message||e);
+        return null;
+      }
+    }
+
+    // アルバムメタを Supabase で更新
+    async function updateAlbumMetaInSupabase(albumSupabaseId, title, subtitle, coverPhotoUrl){
+      var sb = getSupabaseClient();
+      if(!sb || !albumSupabaseId) return;
+      var upd = {};
+      if(title !== undefined) upd.title = title;
+      if(subtitle !== undefined) upd.subtitle = subtitle;
+      if(coverPhotoUrl !== undefined) upd.cover_photo_url = coverPhotoUrl;
+      try{
+        var res = await sb.from('albums').update(upd).eq('id', albumSupabaseId);
+        if(res.error) throw res.error;
+      }catch(e){ console.warn('updateAlbumMeta failed:', e.message||e); }
+    }
+
+    // 写真配列を Supabase album_photos に一括挿入
+    async function saveAlbumPhotosToSupabase(albumSupabaseId, photos){
+      var sb = getSupabaseClient();
+      if(!sb || !albumSupabaseId || !photos || !photos.length) return false;
+      try{
+        var rows = photos.map(function(p, i){
+          return {id: p.id, album_id: albumSupabaseId, url: p.src, photo_type: p.type||'image', sort_order: i};
+        }).filter(function(r){return !!r.url;});
+        if(!rows.length) return false;
+        var res = await sb.from('album_photos').insert(rows);
+        if(res.error) throw res.error;
+        return true;
+      }catch(e){
+        console.warn('saveAlbumPhotos failed:', e.message||e);
+        return false;
+      }
+    }
+
+    // Supabase からアルバム一覧を取得してローカルに反映
+    async function loadAlbumsFromSupabase(){
+      var sb = getSupabaseClient();
+      if(!sb) return false;
+      try{
+        var res = await sb.from('albums')
+          .select('id,title,subtitle,type,event_id,cover_photo_url,created_at')
+          .order('created_at',{ascending:false});
+        if(res.error) throw res.error;
+        var albumRows = res.data || [];
+        if(!albumRows.length) return true;
+        var albumIds = albumRows.map(function(a){return a.id;});
+        var pRes = await sb.from('album_photos')
+          .select('id,album_id,url,photo_type,sort_order')
+          .in('album_id', albumIds)
+          .order('sort_order',{ascending:true});
+        if(pRes.error) throw pRes.error;
+        var photosByAlbum = {};
+        (pRes.data||[]).forEach(function(p){
+          if(!photosByAlbum[p.album_id]) photosByAlbum[p.album_id] = [];
+          photosByAlbum[p.album_id].push({id:p.id, src:p.url, type:p.photo_type||'image'});
+        });
+        albumRows.forEach(function(row){
+          var photos = photosByAlbum[row.id] || [];
+          var existingIdx = ALBUMS.findIndex(function(a){return a.supabaseId===row.id;});
+          var ev = row.event_id ? (EVENTS||[]).find(function(x){return x.supabaseId===row.event_id;}) : null;
+          var album = {
+            id: 'a-sb-'+row.id.slice(0,8),
+            supabaseId: row.id,
+            title: row.title,
+            subtitle: row.subtitle||'',
+            type: row.type||'event',
+            eventKey: ev ? ev.id : '',
+            photos: photos,
+            cover: photos.length ? photos[0].id : '',
+            source: 'supabase'
+          };
+          if(existingIdx >= 0) ALBUMS[existingIdx] = album;
+          else ALBUMS.unshift(album);
+        });
+        renderAlbums(); renderHomeAlbums(); renderAdminAlbums();
+        return true;
+      }catch(e){
+        console.warn('loadAlbumsFromSupabase failed:', e.message||e);
+        return false;
+      }
     }
     function mapSupabaseNoticeRow(row){
       var ev = (EVENTS||[]).find(function(item){return item.supabaseId===row.event_id || item.id===row.event_id;});
@@ -3037,6 +3249,16 @@
       showPage('party');
     }
     function openApplyForEvent(eventId){
+      var targetId = eventId || APPLY_EVENT_ID;
+      var ev = (EVENTS||[]).find(function(e){return e.id===targetId;});
+      if(ev){
+        var st = getEventEffectiveStatus(ev);
+        var dlPassed = !!(ev.deadline && TODAY > ev.deadline);
+        if(st==='past' || st==='draft' || dlPassed){
+          showToast('このイベントの募集は終了しました','warn');
+          return;
+        }
+      }
       if(eventId){
         APPLY_EVENT_ID = eventId;
         CURRENT_DETAIL_EVID = eventId;
@@ -3370,6 +3592,15 @@
       if(t5) t5.textContent = isEventApply ? '交流会情報' : '交流会に参加しますか？';
       setDisplay('apply-event-step1', isEventApply && applyStep===2, 'grid');
       setDisplay('apply-basic-step1', !isEventApply || applyStep===1, 'block');
+      var bazaarDetailEl = document.getElementById('apply-bazaar-detail');
+      if(bazaarDetailEl){
+        if(!isEventApply && ev && ev.detail && applyStep===1){
+          bazaarDetailEl.innerHTML = '<b style="font-size:15px">出店募集要項</b><span style="white-space:pre-wrap;word-break:break-word">'+h(ev.detail)+'</span>';
+          bazaarDetailEl.style.display = 'grid';
+        } else {
+          bazaarDetailEl.style.display = 'none';
+        }
+      }
       setDisplay('apply-bazaar-step2', !isEventApply);
       setDisplay('apply-event-step2', isEventApply, 'grid');
       setDisplay('apply-bazaar-step3', !isEventApply);
@@ -5031,7 +5262,11 @@
     }
     function handleSheetBackdropClick(event){
       if(!event || event.target!==event.currentTarget) return;
-      if(__eventEditContext.active) showToast('入力内容を一時保存しました');
+      // 編集中は誤タップで閉じない（入力保護）。閉じるときは右上の×を使う
+      if(__eventEditContext.active){
+        showToast('入力中です。閉じるときは右上の × を押してください','warn');
+        return;
+      }
       closeSheet();
     }
     function setSurveyPreviewMode(enabled){
@@ -5463,7 +5698,8 @@
         return;
       }
       var status = getEventEffectiveStatus(ev);
-      var statusBadge = status==='past' ? '<span class="badge mint">終了</span>' : status==='draft' ? '<span class="badge orange">準備中</span>' : '<span class="badge">募集中</span>';
+      var deadlinePassed = !!(ev.deadline && TODAY > ev.deadline);
+      var statusBadge = status==='past' ? '<span class="badge mint">終了</span>' : status==='draft' ? '<span class="badge orange">準備中</span>' : (deadlinePassed ? '<span class="badge mint">募集終了</span>' : '<span class="badge">募集中</span>');
       var isEventOnly = isParticipantOnlyEvent(ev);
       var kindBadge = getEventKindBadgeHtml(ev);
       var favoriteButton = renderFavoriteButton(ev.id);
@@ -5490,7 +5726,9 @@
         : '';
       var applyBtn = status==='past'
         ? '<button class="primary apply-link" onclick="openVisitorSurveyForm(\''+ev.id+'\')">⭐ 来場者アンケートに回答</button>'
-        : '<a class="primary apply-link" href="#apply" onclick="openApplyForEvent(\''+ev.id+'\');return false;">'+(isParticipantOnlyEvent(ev)?'参加申し込み':'出店申し込み')+'</a>';
+        : deadlinePassed
+          ? '<button class="primary apply-link" disabled style="opacity:.55;cursor:not-allowed">募集は終了しました</button>'
+          : '<a class="primary apply-link" href="#apply" onclick="openApplyForEvent(\''+ev.id+'\');return false;">'+(isParticipantOnlyEvent(ev)?'参加申し込み':'出店申し込み')+'</a>';
       var detailImages = getEventGalleryImages(ev, 5);
       var heroSlidesHtml = detailImages.map(function(src, idx){
         var safeSrc = String(src).replace(/"/g,'&quot;');
@@ -5521,7 +5759,7 @@
             (ev.venue?'<span><svg class="icon"><use href="#i-map"/></svg> '+ev.venue+'</span>':'')+
             (ev.address?'<span><svg class="icon"><use href="#i-map"/></svg> <a href="javascript:void(0)" onclick="openMap(this);return false;" data-address="'+(ev.address||'').replace(/"/g,'&quot;')+'" data-mapurl="'+(ev.mapUrl||'').replace(/"/g,'&quot;')+'" style="color:var(--ink);text-decoration:underline;text-underline-offset:2px">'+ev.address+'</a></span>':'')+
           '</div>'+
-          (ev.detail?'<p class="helper" style="margin-top:12px">'+ev.detail+'</p>':'')+
+          (ev.detail && isEventOnly ?'<p class="helper" style="margin-top:12px;white-space:pre-wrap;word-break:break-word">'+h(ev.detail)+'</p>':'')+
           '<div class="actions application-actions">'+partyApplyBtn+applyBtn+'</div>'+
         '</article>'+
         sectionBottomHtml;
@@ -6948,6 +7186,7 @@ mikke.ruu2025@gmail.com`,
     function handleEyecatchSelected(input){
       var file=input.files && input.files[0];
       if(!file) return;
+      window.__lastEyecatchFile = file; // Storage アップロード用に保持
       var reader=new FileReader();
       reader.onload=function(e){
         var img=document.getElementById('upload-preview-img');
@@ -6959,27 +7198,53 @@ mikke.ruu2025@gmail.com`,
       };
       reader.readAsDataURL(file);
     }
-    function submitEyecatch(){
-      var dataUrl=window.__lastEyecatchDataUrl;
+    async function submitEyecatch(){
+      var dataUrl = window.__lastEyecatchDataUrl;
+      var file    = window.__lastEyecatchFile;
       if(!dataUrl){showToast('画像を選択してください','warn');return}
+
+      // ─ Storage へアップロード（ログイン中なら）─
+      var imageUrl = dataUrl; // フォールバック: data-URL のまま
+      var sb = getSupabaseClient();
+      if(sb && file && CURRENT_USER_EMAIL){
+        var safeEmail = CURRENT_USER_EMAIL.replace(/[^a-zA-Z0-9]/g,'_');
+        var ext = (file.type||'image/jpeg').split('/')[1] || 'jpg';
+        var path = 'eyecatch/'+safeEmail+'/'+Date.now()+'.'+ext;
+        showToast('アイキャッチをアップロード中…','');
+        var storageUrl = await uploadFileToStorage(path, file);
+        if(storageUrl) imageUrl = storageUrl;
+      }
+
       // マイページの新アイキャッチ枠に反映（提出済化／アバターも内部で更新）
-      applyEyecatchToMypage(dataUrl);
+      applyEyecatchToMypage(imageUrl);
+
       // 管理カードのアイキャッチ状態を更新（画像ソースも保持）
       if(CURRENT_USER_EMAIL){
         Array.from(document.querySelectorAll('#admin-applications .exhibitor-card')).forEach(function(c){
           if((c.dataset.email||'').toLowerCase()===CURRENT_USER_EMAIL.toLowerCase()){
             c.dataset.eyecatch='1';
-            c.dataset.eyecatchsrc=dataUrl;
+            c.dataset.eyecatchsrc=imageUrl;
           }
         });
         syncApplicationsFromCards();
       }
+
+      // Supabase applications の eyecatch_image_url を更新（Storage URL で上書き）
+      if(sb && CURRENT_USER_EMAIL){
+        var latestApp = (APPLICATIONS||[]).find(function(a){
+          return (a.email||'').toLowerCase() === CURRENT_USER_EMAIL.toLowerCase();
+        });
+        var evSupabaseId = latestApp
+          ? ((EVENTS||[]).find(function(e){return e.id===latestApp.event;})||{}).supabaseId || null
+          : null;
+        await updateMyEyecatchInSupabase(imageUrl, evSupabaseId||undefined);
+      }
+
       // アイキャッチ一覧を現在フィルタで再描画
       var eyeSel = document.getElementById('eyecatch-event-filter');
       if(eyeSel && typeof changeEyecatchEvent==='function') changeEyecatchEvent(eyeSel);
       // 出店者一覧の画像も再描画
       renderExhibitorsPage(CURRENT_EXHIBITORS_EVID);
-
       // ダッシュボード再集計
       var dashEv = typeof getCurrentDashboardEvent==='function' ? getCurrentDashboardEvent() : null;
       if(dashEv && typeof applyEventData==='function') applyEventData(dashEv.key);
@@ -7842,15 +8107,26 @@ mikke.ruu2025@gmail.com`,
       var fileInput = document.getElementById('ae-eyecatch-file');
       var picked = fileInput && fileInput.files && fileInput.files[0];
       if(picked){
-        var fr = new FileReader();
-        fr.onload = function(e){
-          var src = e && e.target ? (e.target.result || '') : '';
-          applySave(src);
-        };
-        fr.onerror = function(){
-          applySave(window.__aeEyecatchDataUrl || '');
-        };
-        fr.readAsDataURL(picked);
+        // Storage アップロード → 失敗時は data-URL フォールバック
+        var safeEmail = (newMail||'unknown').replace(/[^a-zA-Z0-9]/g,'_');
+        var ext2 = (picked.type||'image/jpeg').split('/')[1] || 'jpg';
+        var eyePath = 'eyecatch/'+safeEmail+'/admin_'+Date.now()+'.'+ext2;
+        uploadFileToStorage(eyePath, picked).then(function(storageUrl){
+          if(storageUrl){
+            applySave(storageUrl);
+            // Supabase applications テーブルも更新
+            var appCard2 = document.getElementById(appId);
+            if(appCard2 && appCard2.dataset.supabaseid){
+              adminUpdateEyecatchInSupabase(appCard2.dataset.supabaseid, storageUrl);
+            }
+          } else {
+            // Storage 失敗: data-URL フォールバック
+            var fr = new FileReader();
+            fr.onload = function(e){ applySave(e && e.target ? (e.target.result || '') : ''); };
+            fr.onerror = function(){ applySave(window.__aeEyecatchDataUrl || ''); };
+            fr.readAsDataURL(picked);
+          }
+        });
       }else{
         applySave(window.__aeEyecatchDataUrl || '');
       }
@@ -10530,20 +10806,55 @@ mikke.ruu2025@gmail.com`,
         renderEventList();
         showToast('イベントを保存しました','success');
         closeSheet(true);
+        // Supabase に書き込み（非同期・失敗してもUIは閉じる）
+        saveEventToSupabase(ev).then(function(ok){
+          if(!ok) console.warn('Supabase event write failed for', ev.id);
+        });
       };
-      var readFiles = function(files){
-        return Promise.all((files||[]).map(function(file){
-          return new Promise(function(resolve){
-            var fr = new FileReader();
-            fr.onload = function(e){resolve(e.target.result||'');};
-            fr.onerror = function(){resolve('');};
-            fr.readAsDataURL(file);
-          });
-        })).then(function(list){return list.filter(function(src){return !!src;});});
+
+      // ファイルを Storage にアップロードし URL を返す
+      // Storage 未設定または失敗時は data-URL にフォールバック
+      var uploadOrReadFile = function(file, storagePath){
+        return new Promise(function(resolve){
+          var sb = getSupabaseClient();
+          if(sb && file){
+            uploadFileToStorage(storagePath, file).then(function(url){
+              if(url){ resolve(url); return; }
+              // フォールバック: data-URL
+              var fr = new FileReader();
+              fr.onload = function(e){ resolve(e.target.result||''); };
+              fr.onerror = function(){ resolve(''); };
+              fr.readAsDataURL(file);
+            });
+          } else if(file) {
+            var fr2 = new FileReader();
+            fr2.onload = function(e){ resolve(e.target.result||''); };
+            fr2.onerror = function(){ resolve(''); };
+            fr2.readAsDataURL(file);
+          } else {
+            resolve('');
+          }
+        });
       };
+
+      var uploadCoverFiles = function(files){
+        if(!files || !files.length) return Promise.resolve([]);
+        return Promise.all(Array.from(files).map(function(file, i){
+          var ext = (file.type||'image/jpeg').split('/')[1] || 'jpg';
+          return uploadOrReadFile(file, 'events/'+ev.id+'/cover_'+i+'_'+Date.now()+'.'+ext);
+        })).then(function(list){return list.filter(function(s){return !!s;});});
+      };
+      var uploadGalleryFiles = function(files){
+        if(!files || !files.length) return Promise.resolve([]);
+        return Promise.all(Array.from(files).map(function(file, i){
+          var ext = (file.type||'image/jpeg').split('/')[1] || 'jpg';
+          return uploadOrReadFile(file, 'events/'+ev.id+'/gallery_'+i+'_'+Date.now()+'.'+ext);
+        })).then(function(list){return list.filter(function(s){return !!s;});});
+      };
+
       Promise.all([
-        readFiles(draft.coverFiles||[]),
-        readFiles(draft.galleryFiles||[])
+        uploadCoverFiles(draft.coverFiles||[]),
+        uploadGalleryFiles(draft.galleryFiles||[])
       ]).then(function(result){
         var coverImgs = result[0] || [];
         var galleryImgs = result[1] || [];
@@ -10571,6 +10882,41 @@ mikke.ruu2025@gmail.com`,
       return 'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="400" height="400" fill="'+color+'"/><text x="200" y="220" font-size="34" fill="white" text-anchor="middle" font-family="sans-serif">'+label+'</text></svg>');
     }
     function uid2(){return 'p-'+Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
+
+    // ファイルを Storage にアップロードして写真オブジェクト配列に変換
+    // albumId: Storage パスの一部に使う（ローカル ID または任意の文字列）
+    function filesToPhotosWithStorage(albumId, files, doneCb){
+      var fileArr = files ? Array.from(files) : [];
+      if(!fileArr.length){ doneCb([]); return; }
+      var sb = getSupabaseClient();
+      Promise.all(fileArr.map(function(file){
+        var photoId = uid2();
+        var isVideo = (file.type||'').indexOf('video') === 0;
+        if(!isVideo && sb){
+          var ext = (file.type||'image/jpeg').split('/')[1] || 'jpg';
+          var path = 'albums/'+albumId+'/'+photoId+'.'+ext;
+          return uploadFileToStorage(path, file).then(function(url){
+            if(url) return {id:photoId, src:url, type:'image'};
+            // Storage 失敗 → data-URL フォールバック
+            return new Promise(function(resolve){
+              var fr = new FileReader();
+              fr.onload = function(e){ resolve({id:photoId, src:e.target.result||'', type:'image'}); };
+              fr.onerror = function(){ resolve({id:photoId, src:'', type:'image'}); };
+              fr.readAsDataURL(file);
+            });
+          });
+        }
+        // 動画 or Supabase 未設定: data-URL
+        return new Promise(function(resolve){
+          var fr2 = new FileReader();
+          fr2.onload = function(e){ resolve({id:photoId, src:e.target.result||'', type:isVideo?'video':'image'}); };
+          fr2.onerror = function(){ resolve({id:photoId, src:'', type:isVideo?'video':'image'}); };
+          fr2.readAsDataURL(file);
+        });
+      })).then(function(photos){
+        doneCb(photos.filter(function(p){return !!p.src;}));
+      });
+    }
 
     // 各アルバムに写真配列を持たせる
     var ALBUMS = [];
@@ -10668,12 +11014,13 @@ mikke.ruu2025@gmail.com`,
       if(!title){showToast('タイトルを入力してください','warn');return}
       var fileInput = document.getElementById('admin-album-files');
       var files = fileInput && fileInput.files ? fileInput.files : [];
-      var album = {id:'a-'+Date.now().toString(36), type:adminAlbumType, title:title, subtitle:subtitle, date:todayStr(), cover:'', photos:[]};
+      var localId = 'a-'+Date.now().toString(36);
+      var album = {id:localId, type:adminAlbumType, title:title, subtitle:subtitle, date:todayStr(), cover:'', photos:[]};
       if(adminAlbumType==='event'){
         var sel = document.getElementById('admin-album-event');
         if(sel) album.eventKey = sel.value;
       }
-      filesToPhotos(files, function(photos){
+      filesToPhotosWithStorage(localId, files, function(photos){
         album.photos = photos;
         if(photos.length) album.cover = photos[0].id;
         ALBUMS.unshift(album);
@@ -10682,6 +11029,14 @@ mikke.ruu2025@gmail.com`,
         if(fileInput) fileInput.value='';
         renderAlbums(); renderHomeAlbums(); renderAdminAlbums();
         showToast('アルバムを保存しました（'+photos.length+'枚）','success');
+        // Supabase 保存
+        saveAlbumToSupabase(album).then(function(supabaseId){
+          if(!supabaseId) return;
+          album.supabaseId = supabaseId;
+          var coverPhoto = photos.find(function(p){return p.id===album.cover;});
+          if(coverPhoto) updateAlbumMetaInSupabase(supabaseId, undefined, undefined, coverPhoto.src);
+          return saveAlbumPhotosToSupabase(supabaseId, photos);
+        });
       });
     }
 
@@ -10746,17 +11101,21 @@ mikke.ruu2025@gmail.com`,
       var st = document.getElementById('sheet-title'); if(st) st.textContent = a.title;
       var ss = document.getElementById('sheet-sub'); if(ss) ss.textContent = (a.type==='event'?'過去イベント':'自由アルバム')+' / '+a.subtitle;
       showToast('保存しました','success');
+      // Supabase 更新
+      if(a.supabaseId) updateAlbumMetaInSupabase(a.supabaseId, a.title, a.subtitle);
     }
     function addPhotosToAlbum(albumId, input){
       var a = ALBUMS.find(function(x){return x.id===albumId});
       if(!a || !input || !input.files || !input.files.length) return;
-      filesToPhotos(input.files, function(photos){
+      filesToPhotosWithStorage(albumId, input.files, function(photos){
         a.photos = (a.photos||[]).concat(photos);
         if(!a.cover && a.photos.length) a.cover = a.photos[0].id;
         input.value = '';
         refreshAdminPhotoGrid(albumId);
         renderAlbums(); renderHomeAlbums(); renderAdminAlbums();
         showToast(photos.length+'枚を追加しました','success');
+        // Supabase 保存
+        if(a.supabaseId) saveAlbumPhotosToSupabase(a.supabaseId, photos);
       });
     }
     function removePhoto(albumId, photoId){
@@ -10769,6 +11128,11 @@ mikke.ruu2025@gmail.com`,
       refreshAdminPhotoGrid(albumId);
       renderAlbums(); renderHomeAlbums(); renderAdminAlbums();
       showToast('写真を削除しました');
+      // Supabase 削除
+      if(a.supabaseId){
+        var sb2 = getSupabaseClient();
+        if(sb2) sb2.from('album_photos').delete().eq('id', photoId).then(function(){});
+      }
     }
     function setAlbumCover(albumId, photoId){
       var a = ALBUMS.find(function(x){return x.id===albumId});
@@ -10777,11 +11141,21 @@ mikke.ruu2025@gmail.com`,
       refreshAdminPhotoGrid(albumId);
       renderAlbums(); renderHomeAlbums(); renderAdminAlbums();
       showToast('カバー画像を変更しました','success');
+      // Supabase 更新
+      if(a.supabaseId){
+        var coverP = (a.photos||[]).find(function(p){return p.id===photoId;});
+        if(coverP) updateAlbumMetaInSupabase(a.supabaseId, undefined, undefined, coverP.src);
+      }
     }
     function deleteAlbum(albumId){
       var a = ALBUMS.find(function(x){return x.id===albumId});
       if(!a) return;
       if(!confirm('「'+a.title+'」を削除しますか？この操作は取り消せません。')) return;
+      // Supabase 削除（album_photos は CASCADE で自動削除）
+      if(a.supabaseId){
+        var sb3 = getSupabaseClient();
+        if(sb3) sb3.from('albums').delete().eq('id', a.supabaseId).then(function(){});
+      }
       ALBUMS = ALBUMS.filter(function(x){return x.id!==albumId});
       closeSheet();
       renderAlbums(); renderHomeAlbums(); renderAdminAlbums();
@@ -10992,7 +11366,8 @@ mikke.ruu2025@gmail.com`,
         .then(function(){return loadCurrentUserApplicationsFromSupabase({silent:true});})
         .then(function(){return loadCurrentUserNoticesFromSupabase({silent:true});})
         .then(function(){return loadAdminApplicationsFromSupabase({silent:true});})
-        .then(function(){return loadAdminMailLogsFromSupabase({silent:true});});
+        .then(function(){return loadAdminMailLogsFromSupabase({silent:true});})
+        .then(function(){return loadAlbumsFromSupabase();});
     });
     // 即実行も保険で
     setTimeout(renderAll, 100);
