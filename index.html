@@ -2530,7 +2530,7 @@
       var apps = Array.isArray(APPLICATIONS) ? APPLICATIONS : [];
       if(getSupabaseClient()){
         if(CURRENT_USER_ROLE !== 'admin') return [];
-        return apps.filter(function(app){ return app && (app.source === 'supabase' || app.source === 'manual'); });
+        return apps.filter(function(app){ return app && app.source === 'supabase'; });
       }
       return apps;
     }
@@ -2862,6 +2862,12 @@
           return !(p && (isSeedId(p.event) || isSeedId(p.eventId)));
         });
         if(PARTY_APPLICATIONS.length !== beforeP) changed = true;
+      }
+      // Supabase接続時はSupabaseを唯一の正とし、前セッションのローカル残骸（手動/試作の申込）を掃除する
+      if(typeof getSupabaseClient==='function' && getSupabaseClient() && Array.isArray(APPLICATIONS)){
+        var beforeL = APPLICATIONS.length;
+        APPLICATIONS = APPLICATIONS.filter(function(a){ return a && a.source === 'supabase'; });
+        if(APPLICATIONS.length !== beforeL) changed = true;
       }
       try{ localStorage.setItem(REAL_SEED_KEY, '1'); }catch(e){}
       if(changed){ markStateDirty(); saveAppState(); }
