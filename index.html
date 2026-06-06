@@ -711,6 +711,12 @@
     .mypage-app-detail{margin-top:0}
 
     .admin-menu-label{display:flex;align-items:center;gap:5px;margin:0 0 7px;font-size:11px;font-weight:900;color:var(--sub);letter-spacing:.04em;text-transform:uppercase}
+    .admin-more{margin-top:12px}
+    .admin-more>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border:1px solid var(--line);border-radius:16px;background:#fff;font-size:13px;font-weight:900;color:var(--ink)}
+    .admin-more>summary::-webkit-details-marker{display:none}
+    .admin-more>summary .chev{transition:transform .2s}
+    .admin-more[open]>summary .chev{transform:rotate(90deg)}
+    .category-list.compact{gap:6px}.category-list.compact .category-row{padding:3px 0}.category-list.compact .category-head{font-size:12.5px}
   </style>
 </head>
 <body>
@@ -1410,7 +1416,10 @@
           <button class="primary" type="button" onclick="adminPasswordLogin()" style="margin-top:10px">ログイン</button>
           <button type="button" onclick="sendAdminPasswordSetup()" style="margin-top:8px;background:none;border:none;color:var(--ruu);font-size:12px;font-weight:800;text-decoration:underline;cursor:pointer;padding:4px">初回の方・パスワードを忘れた方はこちら</button>
         </div>
-        <button class="primary" onclick="openNewEventSheet()" style="width:100%;margin-bottom:16px"><svg class="icon"><use href="#i-calendar"/></svg>イベントを作成する</button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+          <button class="primary" onclick="openNewEventSheet()" style="width:100%;margin:0"><svg class="icon"><use href="#i-calendar"/></svg>イベント作成</button>
+          <button class="primary" onclick="openAllAppsPanel()" style="width:100%;margin:0"><svg class="icon"><use href="#i-user"/></svg>申込を見る</button>
+        </div>
 
         <div class="event-data-card">
           <h2><svg class="icon"><use href="#i-user"/></svg>バザール別データ一覧</h2>
@@ -1433,73 +1442,54 @@
             <button class="event-data-button" onclick="openAppsPanel('no-eyecatch')"><span>アイキャッチ未提出</span><strong>6件</strong><small>催促対象を見る</small></button>
           </div>
 
+          <!-- 日程タイムライン -->
+          <div class="dash-timeline-card" style="margin-top:4px;border:1px solid var(--line);border-radius:17px;background:#fff;padding:13px 15px 6px">
+            <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">
+              <svg class="icon" style="width:15px;height:15px;color:var(--ruu)"><use href="#i-calendar"/></svg>
+              <h2 class="section-title" style="margin:0;font-size:13px">日程</h2>
+            </div>
+            <div id="dash-timeline-rows"></div>
+          </div>
+
           <div>
-            <div class="section-head" style="margin:0 0 10px"><h2 class="section-title">出店カテゴリー</h2><span class="section-link">残り 2枠</span></div>
-            <div class="category-list">
-              <button class="category-row" onclick="openAppsPanel('all')"><div class="category-head"><span>申し込み数</span><span>36件</span></div><div class="category-track"><div class="category-fill" style="width:72%"></div></div></button>
-              <button class="category-row" onclick="openAppsPanel('food')"><div class="category-head"><span>飲食</span><span>6 / 7</span></div><div class="category-track"><div class="category-fill" style="width:86%"></div></div></button>
-              <button class="category-row" onclick="openAppsPanel('retail')"><div class="category-head"><span>物販</span><span>8 / 8</span></div><div class="category-track"><div class="category-fill" style="width:100%"></div></div></button>
-              <button class="category-row" onclick="openAppsPanel('session')"><div class="category-head"><span>セッション</span><span>5 / 7</span></div><div class="category-track"><div class="category-fill" style="width:72%"></div></div></button>
-              <button class="category-row" onclick="openAppsPanel('treatment')"><div class="category-head"><span>施術</span><span>6 / 8</span></div><div class="category-track"><div class="category-fill" style="width:75%"></div></div></button>
-              <button class="category-row" onclick="openAppsPanel('party-yes')"><div class="category-head"><span>交流会参加者</span><span>18名</span></div><div class="category-track"><div class="category-fill" style="width:64%"></div></div></button>
+            <div class="section-head" style="margin:0 0 8px"><h2 class="section-title">出店カテゴリー</h2><span class="section-link">残り 2枠</span></div>
+            <div class="category-list compact">
+              <button class="category-row" onclick="openAppsPanel('all')"><div class="category-head"><span>申し込み数</span><span>36件</span></div></button>
+              <button class="category-row" onclick="openAppsPanel('food')"><div class="category-head"><span>飲食</span><span>6 / 7</span></div></button>
+              <button class="category-row" onclick="openAppsPanel('retail')"><div class="category-head"><span>物販</span><span>8 / 8</span></div></button>
+              <button class="category-row" onclick="openAppsPanel('session')"><div class="category-head"><span>セッション</span><span>5 / 7</span></div></button>
+              <button class="category-row" onclick="openAppsPanel('treatment')"><div class="category-head"><span>施術</span><span>6 / 8</span></div></button>
+              <button class="category-row" onclick="openAppsPanel('party-yes')"><div class="category-head"><span>交流会参加者</span><span>18名</span></div></button>
             </div>
           </div>
 
-          <!-- 売上カード -->
-          <button id="dash-revenue-card" onclick="openSelectedEventInList()" style="display:grid;grid-template-columns:36px 1fr auto;gap:10px;align-items:center;width:100%;padding:14px 16px;border-radius:17px;border:1px solid #fde8ee;background:linear-gradient(135deg,#fff5f7,#fff);cursor:pointer;margin-top:4px;text-align:left">
-            <span style="width:36px;height:36px;border-radius:12px;background:#ffe6ec;display:grid;place-items:center;flex-shrink:0">
-              <svg class="icon" style="width:18px;height:18px;color:var(--ruu)"><use href="#i-file"/></svg>
-            </span>
-            <div>
-              <p style="margin:0;font-size:11px;color:var(--sub);font-weight:850" id="dash-rev-label">見込み売上（出店料＋交流会）</p>
-              <p style="margin:2px 0 0;font-size:18px;font-weight:900;color:var(--ruu)" id="dash-rev-amount">¥0</p>
-              <p style="margin:1px 0 0;font-size:10px;color:var(--sub);font-weight:600" id="dash-rev-breakdown">タップで詳細</p>
+          <!-- 売上見込み（出店料・交流会 別々・数字のみ） -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div style="padding:10px 12px;border-radius:14px;border:1px solid #fde8ee;background:#fff7f9">
+              <p style="margin:0;font-size:11px;color:var(--sub);font-weight:850">出店料</p>
+              <p style="margin:2px 0 0;font-size:17px;font-weight:900;color:var(--ruu)" id="dash-rev-fee">¥0</p>
             </div>
-            <svg class="icon" style="width:16px;height:16px;color:var(--sub)"><use href="#i-chevron"/></svg>
-          </button>
-
-          <!-- イベント詳細ページへのリンク -->
-          <button onclick="openSelectedEventInList()" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:14px 16px;border-radius:17px;border:1px solid var(--line);background:#fff;cursor:pointer;margin-top:4px">
-            <div style="display:flex;align-items:center;gap:10px">
-              <span style="width:36px;height:36px;border-radius:12px;background:#f3f0ff;display:grid;place-items:center;flex-shrink:0">
-                <svg class="icon" style="width:18px;height:18px;color:var(--ruu)"><use href="#i-calendar"/></svg>
-              </span>
-              <div style="text-align:left">
-                <p style="margin:0;font-size:13px;font-weight:900;color:var(--ink)">このバザールの詳細を見る</p>
-                <p style="margin:0;font-size:11px;color:var(--sub)">タイムライン・出店者・編集・売上集計まで</p>
-              </div>
+            <div style="padding:10px 12px;border-radius:14px;border:1px solid #c5ecee;background:#f3fbfc">
+              <p style="margin:0;font-size:11px;color:var(--sub);font-weight:850">交流会</p>
+              <p style="margin:2px 0 0;font-size:17px;font-weight:900;color:#1f9ca0" id="dash-rev-party">¥0</p>
             </div>
-            <svg class="icon" style="width:16px;height:16px;color:var(--sub)"><use href="#i-chevron"/></svg>
-          </button>
+          </div>
 
-          <button onclick="toggleAdminPanel('admin-eyecatch')" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:14px 16px;border-radius:17px;border:1px solid var(--line);background:#fff;cursor:pointer;margin-top:4px">
-            <div style="display:flex;align-items:center;gap:10px">
-              <span style="width:36px;height:36px;border-radius:12px;background:#f3f0ff;display:grid;place-items:center;flex-shrink:0">
-                <svg class="icon" style="width:18px;height:18px;color:var(--ruu)"><use href="#i-download"/></svg>
-              </span>
-              <div style="text-align:left">
-                <p style="margin:0;font-size:13px;font-weight:900;color:var(--ink)">アイキャッチ一覧・DL</p>
-                <p style="margin:0;font-size:11px;color:var(--sub)">提出済み画像をまとめてDL / チラシ作成用</p>
-              </div>
-            </div>
-            <svg class="icon" style="width:16px;height:16px;color:var(--sub)"><use href="#i-chevron"/></svg>
-          </button>
-
-          <button onclick="openSendEventNoticeSheet()" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:14px 16px;border-radius:17px;border:1px solid var(--line);background:#fff;cursor:pointer;margin-top:4px">
-            <div style="display:flex;align-items:center;gap:10px">
-              <span style="width:36px;height:36px;border-radius:12px;background:#fff5f7;display:grid;place-items:center;flex-shrink:0">
-                <svg class="icon" style="width:18px;height:18px;color:var(--ruu)"><use href="#i-bell"/></svg>
-              </span>
-              <div style="text-align:left">
-                <p style="margin:0;font-size:13px;font-weight:900;color:var(--ink)">このバザールの出店者全員にお知らせを送る</p>
-                <p style="margin:0;font-size:11px;color:var(--sub)" id="event-notice-target-label">対象：vol.14 たまプラーザの出店者全員</p>
-              </div>
-            </div>
-            <svg class="icon" style="width:16px;height:16px;color:var(--sub)"><use href="#i-chevron"/></svg>
-          </button>
-
-          <div class="admin-flow-note">
-            新規申し込みを確認 → アイキャッチ登録済みの人は自動チェック → 未提出の人へ通知 → LINE招待後にチェック、という流れで進めます。
+          <!-- 詳細・アイキャッチDL・お知らせ（アイコン操作） -->
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+            <button onclick="openSelectedEventInList()" style="display:grid;justify-items:center;gap:5px;padding:11px 6px;border-radius:14px;border:1px solid var(--line);background:#fff;cursor:pointer">
+              <span style="width:32px;height:32px;border-radius:11px;background:#f3f0ff;display:grid;place-items:center"><svg class="icon" style="width:17px;height:17px;color:var(--ruu)"><use href="#i-calendar"/></svg></span>
+              <span style="font-size:11px;font-weight:850;color:var(--ink)">詳細</span>
+            </button>
+            <button onclick="toggleAdminPanel('admin-eyecatch')" style="display:grid;justify-items:center;gap:5px;padding:11px 6px;border-radius:14px;border:1px solid var(--line);background:#fff;cursor:pointer">
+              <span style="width:32px;height:32px;border-radius:11px;background:#f3f0ff;display:grid;place-items:center"><svg class="icon" style="width:17px;height:17px;color:var(--ruu)"><use href="#i-download"/></svg></span>
+              <span style="font-size:11px;font-weight:850;color:var(--ink)">アイキャッチDL</span>
+            </button>
+            <button onclick="openSendEventNoticeSheet()" style="display:grid;justify-items:center;gap:5px;padding:11px 6px;border-radius:14px;border:1px solid var(--line);background:#fff;cursor:pointer">
+              <span style="width:32px;height:32px;border-radius:11px;background:#fff5f7;display:grid;place-items:center"><svg class="icon" style="width:17px;height:17px;color:var(--ruu)"><use href="#i-bell"/></svg></span>
+              <span style="font-size:11px;font-weight:850;color:var(--ink)">お知らせ</span>
+              <span id="event-notice-target-label" style="display:none"></span>
+            </button>
           </div>
 
           <div id="admin-dup-warning" class="admin-warning-card" style="display:none">
@@ -1547,15 +1537,25 @@
 
           <p class="admin-menu-label"><svg class="icon" style="width:13px;height:13px;color:var(--sub)"><use href="#i-settings"/></svg>共通</p>
           <div class="admin-action-grid">
-            <button onclick="toggleAdminPanel('admin-notice')"><svg class="icon"><use href="#i-bell"/></svg>お知らせ</button>
-            <button onclick="toggleAdminPanel('admin-mail-logs')"><svg class="icon"><use href="#i-file"/></svg>メールログ</button>
-            <button onclick="toggleAdminPanel('admin-faq')"><svg class="icon"><use href="#i-help"/></svg>FAQ</button>
-            <button onclick="toggleAdminPanel('admin-archive-edit')"><svg class="icon"><use href="#i-camera"/></svg>アルバム</button>
-            <button onclick="toggleAdminPanel('admin-template')"><svg class="icon"><use href="#i-file"/></svg>定型文</button>
-            <button onclick="toggleAdminPanel('admin-survey')"><svg class="icon"><use href="#i-file"/></svg>アンケート</button>
-            <button onclick="toggleAdminPanel('admin-org-settings')"><svg class="icon"><use href="#i-settings"/></svg>サイト設定</button>
-            <button onclick="logoutAdmin()" style="grid-column:1/-1;background:#fff8f8;border-color:#f0c8c8;color:#c84a4a;font-size:12px;min-height:42px">🔒 ログアウト</button>
+            <button onclick="toggleAdminPanel('admin-notice')" style="grid-column:1/-1"><svg class="icon"><use href="#i-bell"/></svg>お知らせ</button>
           </div>
+
+          <details class="admin-more">
+            <summary>
+              <span style="display:flex;align-items:center;gap:8px"><svg class="icon" style="width:15px;height:15px;color:var(--sub)"><use href="#i-settings"/></svg>その他・設定</span>
+              <svg class="icon chev" style="width:15px;height:15px;color:var(--sub)"><use href="#i-chevron"/></svg>
+            </summary>
+            <div class="admin-action-grid" style="margin-top:10px">
+              <button onclick="toggleAdminPanel('admin-faq')"><svg class="icon"><use href="#i-help"/></svg>FAQ</button>
+              <button onclick="toggleAdminPanel('admin-survey')"><svg class="icon"><use href="#i-file"/></svg>アンケート</button>
+              <button onclick="toggleAdminPanel('admin-template')"><svg class="icon"><use href="#i-file"/></svg>定型文</button>
+              <button onclick="toggleAdminPanel('admin-archive-edit')"><svg class="icon"><use href="#i-camera"/></svg>アルバム</button>
+              <button onclick="toggleAdminPanel('admin-mail-logs')"><svg class="icon"><use href="#i-file"/></svg>メールログ</button>
+              <button onclick="toggleAdminPanel('admin-org-settings')"><svg class="icon"><use href="#i-settings"/></svg>サイト設定</button>
+            </div>
+          </details>
+
+          <button onclick="logoutAdmin()" style="width:100%;margin-top:12px;background:#fff8f8;border:1px solid #f0c8c8;border-radius:16px;color:#c84a4a;font-size:12px;font-weight:850;min-height:42px;cursor:pointer">🔒 ログアウト</button>
         </div>
 
         <div id="admin-panel-backdrop" class="admin-panel-backdrop" onclick="closeAdminPanel(event)"></div>
@@ -7375,15 +7375,10 @@ mikke.ruu2025@gmail.com`,
         var generalPartyCount = parseInt(ev.party.generalCount||0)||0;
         partyTotal = partyFee * (exhibitorPartyCount+generalPartyCount);
       }
-      var grandTotal = feeTotal + partyTotal;
-      var labelEl = document.getElementById('dash-rev-label');
-      var amountEl = document.getElementById('dash-rev-amount');
-      var bdEl = document.getElementById('dash-rev-breakdown');
-      if(labelEl) labelEl.textContent = (isPast?'実績売上':'見込み売上')+'（出店料＋交流会）';
-      if(amountEl) amountEl.textContent = '¥'+grandTotal.toLocaleString();
-      if(bdEl){
-        bdEl.textContent = '出店料 ¥'+feeTotal.toLocaleString()+' ＋ 交流会 ¥'+partyTotal.toLocaleString();
-      }
+      var feeEl = document.getElementById('dash-rev-fee');
+      var partyEl = document.getElementById('dash-rev-party');
+      if(feeEl) feeEl.textContent = '¥'+feeTotal.toLocaleString();
+      if(partyEl) partyEl.textContent = '¥'+partyTotal.toLocaleString();
     }
 
     // ダッシュボードから現在選択中のイベント詳細を開く
@@ -7450,15 +7445,13 @@ mikke.ruu2025@gmail.com`,
       var iso = normalizeDateInput(ev.date);
       var dateLabel = iso ? formatEvDateShort({date:iso, dayOfWeek:(ev.dayOfWeek||computeDayOfWeek(iso)||'')}) : '日付未設定';
       var apps = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card')).filter(function(c){return c.dataset.event===ev.id || (ev.supabaseId && c.dataset.event===ev.supabaseId);});
-      var applied = apps.filter(function(c){return c.dataset.status==='new' || c.dataset.status==='confirmed';}).length;
+      var newCnt = apps.filter(function(c){return c.dataset.status==='new';}).length;
       var confirmed = apps.filter(function(c){return c.dataset.status==='confirmed';}).length;
-      var cap = getEventCapacityTotal(ev)||0;
       summary.style.cursor = 'pointer';
       summary.innerHTML =
         '<div style="min-width:0">'+
-          '<p style="margin:0;font-weight:900;font-size:13px;color:var(--ink)">'+dateLabel+' '+(ev.name||'イベント名未設定')+'</p>'+
-          '<p style="margin:5px 0 0;font-size:12px;color:var(--sub)">参加申込 '+applied+'件　確定 '+confirmed+'件'+(cap?('　定員 '+cap+'名'):'')+'</p>'+
-          '<p style="margin:6px 0 0;display:flex;gap:5px;flex-wrap:wrap"><span class="badge '+badge.cls+'" style="font-size:11px">'+badge.label+'</span><span class="badge" style="font-size:11px">締切 '+(ev.deadline||'未設定')+'</span></p>'+
+          '<p style="margin:0;font-weight:900;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+dateLabel+' '+(ev.name||'イベント名未設定')+'</p>'+
+          '<p style="margin:5px 0 0;font-size:12.5px;color:var(--sub);font-weight:850">新規 <b style="color:var(--ruu)">'+newCnt+'</b>　確定 <b style="color:#1f9ca0">'+confirmed+'</b></p>'+
         '</div>'+chev;
     }
     function openSelectedEventOnly(){
@@ -7509,17 +7502,94 @@ mikke.ruu2025@gmail.com`,
           ['0件','0 / 0','0 / 0','0 / 0','0 / 0','0名'].forEach(function(label, i){
             var spans = rows[i].querySelectorAll('.category-head span');
             if(spans[1]) spans[1].textContent = label;
-            var fill = rows[i].querySelector('.category-fill');
-            if(fill) fill.style.width = '0%';
           });
         }
-        var labelEl = document.getElementById('dash-rev-label');
-        var amountEl = document.getElementById('dash-rev-amount');
-        var bdEl = document.getElementById('dash-rev-breakdown');
-        if(labelEl) labelEl.textContent = '見込み売上（出店料＋交流会）';
-        if(amountEl) amountEl.textContent = '¥0';
-        if(bdEl) bdEl.textContent = '出店料 ¥0 ＋ 交流会 ¥0';
+        var feeEl = document.getElementById('dash-rev-fee');
+        var partyEl = document.getElementById('dash-rev-party');
+        if(feeEl) feeEl.textContent = '¥0';
+        if(partyEl) partyEl.textContent = '¥0';
+        var tl = document.getElementById('dash-timeline-rows');
+        if(tl) tl.innerHTML = '';
       }
+      // 日程タイムライン（選択中イベントの主要日程を一覧）
+      function renderDashboardTimeline(ev){
+        var host = document.getElementById('dash-timeline-rows');
+        if(!host) return;
+        if(!ev){ host.innerHTML=''; return; }
+        var iso = function(v){ return normalizeDateInput(v); };
+        var addDays = function(s, n){
+          var p = iso(s); if(!p) return '';
+          var d = new Date(p+'T00:00:00');
+          d.setDate(d.getDate()+n);
+          var y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+          return y+'-'+m+'-'+dd;
+        };
+        var fmt = function(s){
+          var p = iso(s); if(!p) return '未設定';
+          var a = p.split('-');
+          var w = (typeof computeDayOfWeek==='function') ? (computeDayOfWeek(p)||'') : '';
+          return (+a[1])+'/'+(+a[2])+(w?'（'+w+'）':'');
+        };
+        var milestones = [
+          {label:'募集開始',         date: iso(ev.recruitStart)},
+          {label:'募集締切',         date: iso(ev.deadline)},
+          {label:'アイキャッチ締切', date: iso(ev.eyecatchDeadline)},
+          {label:'事前説明Zoom',     date: iso(ev.zoomDate), extra: ev.zoomTime||''},
+          {label:'前日リマインド',   date: ev.date ? addDays(ev.date,-1) : ''},
+          {label:'開催当日',         date: iso(ev.date)}
+        ];
+        // 残り日数
+        var daysLeft = function(d){
+          var a = new Date(d+'T00:00:00'), b = new Date(TODAY+'T00:00:00');
+          return Math.round((a-b)/86400000);
+        };
+        // 次の予定 = 今日以降で最も近いマイルストーン
+        var next = null;
+        milestones.forEach(function(m){
+          if(!m.date || m.date < TODAY) return;
+          if(!next || m.date < next.date) next = m;
+        });
+        // 1行（折りたたみ用）
+        var rowHtml = function(m, last){
+          var state, dot, pillColor, pillBg;
+          if(!m.date){ state='未設定'; dot='#d8d3dd'; pillColor='#a59fb0'; pillBg='#f4f1f6'; }
+          else if(m.date < TODAY){ state='済'; dot='#57cdd1'; pillColor='#1f9ca0'; pillBg='#e8f9fa'; }
+          else if(m.date === TODAY){ state='今日'; dot='var(--ruu)'; pillColor='#fff'; pillBg='var(--ruu)'; }
+          else { state='予定'; dot='#e7b9c6'; pillColor='var(--sub)'; pillBg='#fff5f7'; }
+          var dateText = m.date ? (fmt(m.date)+(m.extra?(' '+m.extra):'')) : '—';
+          var border = last ? '' : 'border-bottom:1px solid #f3eef2';
+          return '<div style="display:grid;grid-template-columns:10px 1fr auto auto;align-items:center;gap:9px;padding:7px 0;'+border+'">'+
+            '<span style="width:9px;height:9px;border-radius:50%;background:'+dot+'"></span>'+
+            '<span style="font-size:12.5px;font-weight:800;color:var(--ink)">'+m.label+'</span>'+
+            '<span style="font-size:12px;font-weight:700;color:var(--sub)">'+dateText+'</span>'+
+            '<span style="font-size:10px;font-weight:900;color:'+pillColor+';background:'+pillBg+';border-radius:999px;padding:2px 8px;min-width:34px;text-align:center">'+state+'</span>'+
+          '</div>';
+        };
+        // 次の予定の見出し
+        var nextHtml;
+        if(next){
+          var dl = daysLeft(next.date);
+          var when = dl===0 ? '今日' : dl===1 ? '明日' : ('あと'+dl+'日');
+          var dateText2 = fmt(next.date)+(next.extra?(' '+next.extra):'');
+          nextHtml =
+            '<div style="display:flex;align-items:center;gap:8px;padding:2px 0 4px">'+
+              '<span style="font-size:10px;font-weight:900;color:#fff;background:var(--ruu);border-radius:999px;padding:3px 9px">次の予定</span>'+
+              '<span style="font-size:13px;font-weight:900;color:var(--ink)">'+next.label+'</span>'+
+              '<span style="font-size:12px;font-weight:800;color:var(--sub);margin-left:auto">'+dateText2+'・'+when+'</span>'+
+            '</div>';
+        } else {
+          nextHtml = '<div style="font-size:12.5px;color:var(--sub);font-weight:800;padding:2px 0 4px">予定された日程はありません</div>';
+        }
+        // 全日程は折りたたみ
+        var allRows = milestones.map(function(m, i){ return rowHtml(m, i===milestones.length-1); }).join('');
+        host.innerHTML =
+          nextHtml +
+          '<details style="margin-top:2px">'+
+            '<summary style="list-style:none;cursor:pointer;font-size:11.5px;font-weight:850;color:var(--ruu);padding:4px 0">すべての日程を見る ▾</summary>'+
+            '<div style="margin-top:2px">'+allRows+'</div>'+
+          '</details>';
+      }
+      window.renderDashboardTimeline = renderDashboardTimeline;
       window.applyEventData=function(key){
         var ev = (typeof EVENTS!=='undefined') ? EVENTS.find(function(e){return e.id===key}) : null;
         if(!ev){resetEventDataUI();return;}
@@ -7553,13 +7623,9 @@ mikke.ruu2025@gmail.com`,
         if(rows.length>=6){
           var setRow = function(i, label, count, cap, suffix){
             rows[i].querySelectorAll('.category-head span')[1].textContent = cap ? (count+' / '+cap) : (count+(suffix||''));
-            var fill = cap>0 ? Math.min(100, Math.round(count/cap*100)) : 0;
-            rows[i].querySelector('.category-fill').style.width = fill+'%';
           };
-          // 申し込み数: 数字は常に「N件」表示、バーだけ総定員基準で伸ばす
+          // 申し込み数: 「N件」表示
           rows[0].querySelectorAll('.category-head span')[1].textContent = total+'件';
-          var totalFill = capacity>0 ? Math.min(100, Math.round(total/capacity*100)) : 0;
-          rows[0].querySelector('.category-fill').style.width = totalFill+'%';
           // カテゴリー: 確定済みのみ
           setRow(1, '飲食', confirmedByCat('food'), capF);
           setRow(2, '物販', confirmedByCat('retail'), capR);
@@ -7569,6 +7635,8 @@ mikke.ruu2025@gmail.com`,
         }
         // 売上計算（出店料＋交流会）
         updateDashboardRevenue(ev);
+        // 日程タイムライン
+        renderDashboardTimeline(ev);
       };
       // 主催者ページの「対象イベント」セレクトをEVENTSに同期
       var initDashboard = function(forceEventId){
