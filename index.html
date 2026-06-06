@@ -3976,6 +3976,19 @@
       saveAppState();
       saveApplicationToSupabase(data, id);
       showToast(data.isParticipantEvent ? '参加申込を受付しました' : '出店申込を受付しました','success');
+      (function(){
+        var sb = getSupabaseClient();
+        if(!sb || !data.email) return;
+        sb.auth.signInWithOtp({
+          email: data.email,
+          options: {
+            emailRedirectTo: window.location.origin + window.location.pathname + '#mypage',
+            shouldCreateUser: true,
+          }
+        }).then(function(res){
+          if(res.error) console.warn('[magic-link] send failed:', res.error.message);
+        });
+      })();
     }
     function toggleInlineDetail(){var detail=document.getElementById('home-inline-detail');if(detail){detail.classList.toggle('open')}}
     function toggleUpcomingDetail(id){var detail=document.getElementById(id);if(detail){detail.classList.toggle('open')}}
