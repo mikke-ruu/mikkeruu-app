@@ -1545,6 +1545,7 @@
           <div class="admin-action-grid" style="margin-bottom:14px">
             <button onclick="openEventListForKind('event')"><svg class="icon"><use href="#i-book"/></svg>イベント一覧</button>
             <button onclick="openEventAppsPanel()"><svg class="icon"><use href="#i-user"/></svg>参加申込一覧</button>
+            <button onclick="openManualExhibitorSheet('event')"><svg class="icon"><use href="#i-user"/></svg>参加者を手動登録</button>
           </div>
 
           <p class="admin-menu-label"><svg class="icon" style="width:13px;height:13px;color:var(--sub)"><use href="#i-settings"/></svg>共通</p>
@@ -2467,48 +2468,72 @@
       }
       return apps;
     }
-    function openManualExhibitorSheet(){
-      var dashEv = typeof getCurrentDashboardEvent==='function' ? getCurrentDashboardEvent() : null;
-      if(!dashEv||!dashEv.key){showToast('対象バザールを選んでください','warn');return;}
-      var ev = (EVENTS||[]).find(function(e){return e.id===dashEv.key;});
-      if(!ev){showToast('イベント情報が見つかりません','warn');return;}
-      var feeOpts = ev.feeOptions||[];
-      var feeHtml = feeOpts.length>0
-        ? '<select class="input" id="mr-fee" style="margin-top:4px">'+feeOpts.map(function(f){
-            return '<option value="'+h(f.label)+'">'+h(f.label)+'（¥'+(f.yen||0).toLocaleString()+'）</option>';
-          }).join('')+'</select>'
-        : '<input class="input" id="mr-fee" placeholder="例：UW会員" style="margin-top:4px">';
+    function openManualExhibitorSheet(kind){
+      var isEvent = kind === 'event';
+      var ev = null;
+      var evLabel = '';
+      if(isEvent){
+        var sel = document.getElementById('admin-event-only-selector');
+        var evId = sel ? sel.value : '';
+        ev = evId ? (EVENTS||[]).find(function(e){return e.id===evId;}) : null;
+        if(!ev){showToast('参加募集イベントを選んでください','warn');return;}
+        evLabel = ev.name || evLabel;
+      } else {
+        var dashEv = typeof getCurrentDashboardEvent==='function' ? getCurrentDashboardEvent() : null;
+        if(!dashEv||!dashEv.key){showToast('対象バザールを選んでください','warn');return;}
+        ev = (EVENTS||[]).find(function(e){return e.id===dashEv.key;});
+        if(!ev){showToast('イベント情報が見つかりません','warn');return;}
+        evLabel = dashEv.label;
+      }
       var sid = ev.supabaseId||'';
-      var body = '<div style="display:flex;flex-direction:column;gap:14px">'
-        +'<label style="font-size:11px;font-weight:900;color:var(--sub)">屋号 / ショップ名 <span style="color:var(--ruu)">必須</span>'
-        +'<input class="input" id="mr-shop" placeholder="例：ハンドメイドサクラ" style="margin-top:4px"></label>'
-        +'<label style="font-size:11px;font-weight:900;color:var(--sub)">担当者名（省略可）'
-        +'<input class="input" id="mr-name" placeholder="例：田中 花子" style="margin-top:4px"></label>'
-        +'<label style="font-size:11px;font-weight:900;color:var(--sub)">カテゴリー'
+      var feeOpts = ev.feeOptions||[];
+      var feeBlock = isEvent ? '' :
+        '<label style="font-size:11px;font-weight:900;color:var(--sub)">出店料区分'
+        +(feeOpts.length>0
+          ? '<select class="input" id="mr-fee" style="margin-top:4px">'+feeOpts.map(function(f){
+              return '<option value="'+h(f.label)+'">'+h(f.label)+'（¥'+(f.yen||0).toLocaleString()+'）</option>';
+            }).join('')+'</select>'
+          : '<input class="input" id="mr-fee" placeholder="例：UW会員" style="margin-top:4px">')
+        +'</label>';
+      var categoryBlock = isEvent ? '' :
+        '<label style="font-size:11px;font-weight:900;color:var(--sub)">カテゴリー'
         +'<select class="input" id="mr-category" style="margin-top:4px">'
         +'<option value="retail">物販</option>'
         +'<option value="food">飲食</option>'
         +'<option value="session">セッション</option>'
         +'<option value="treatment">施術</option>'
-        +'</select></label>'
-        +'<label style="font-size:11px;font-weight:900;color:var(--sub)">出店料区分'
-        +feeHtml+'</label>'
+        +'</select></label>';
+      var shopBlock = isEvent ? '' :
+        '<label style="font-size:11px;font-weight:900;color:var(--sub)">屋号 / ショップ名 <span style="color:var(--ruu)">必須</span>'
+        +'<input class="input" id="mr-shop" placeholder="例：ハンドメイドサクラ" style="margin-top:4px"></label>';
+      var nameLabel = isEvent ? '参加者名 <span style="color:var(--ruu)">必須</span>' : '担当者名（省略可）';
+      var namePlaceholder = isEvent ? '例：田中 花子' : '例：田中 花子';
+      var btnLabel = isEvent ? '参加確定で登録する' : '出店確定で登録する';
+      var sheetTitle = isEvent ? '参加者を手動登録' : '出店者を手動登録';
+      var body = '<div style="display:flex;flex-direction:column;gap:14px">'
+        +shopBlock
+        +'<label style="font-size:11px;font-weight:900;color:var(--sub)">'+nameLabel
+        +'<input class="input" id="mr-name" placeholder="'+namePlaceholder+'" style="margin-top:4px"></label>'
+        +categoryBlock
+        +feeBlock
         +'<label style="font-size:11px;font-weight:900;color:var(--sub)">メールアドレス（省略可）'
         +'<input class="input" id="mr-email" type="email" placeholder="例：hanako@example.com（入れるとログイン・確定メール可）" style="margin-top:4px"></label>'
         +'<label style="font-size:11px;font-weight:900;color:var(--sub)">メモ（任意）'
         +'<input class="input" id="mr-memo" placeholder="例：LINE招待済み、備考など" style="margin-top:4px"></label>'
-        +'<button class="primary" type="button" onclick="submitManualExhibitor(\''+ev.id+'\',\''+sid+'\')" style="margin-top:4px">出店確定で登録する</button>'
+        +'<button class="primary" type="button" onclick="submitManualExhibitor(\''+ev.id+'\',\''+sid+'\',\''+kind+'\')" style="margin-top:4px">'+btnLabel+'</button>'
         +'</div>';
-      openSheet('出店者を手動登録', dashEv.label, body);
+      openSheet(sheetTitle, evLabel, body);
     }
-    async function submitManualExhibitor(localEventId, supabaseEventId){
-      var shop = ((document.getElementById('mr-shop')||{}).value||'').trim();
+    async function submitManualExhibitor(localEventId, supabaseEventId, kind){
+      var isEvent = kind === 'event';
+      var shop = isEvent ? '' : ((document.getElementById('mr-shop')||{}).value||'').trim();
       var name = ((document.getElementById('mr-name')||{}).value||'').trim();
-      var category = (document.getElementById('mr-category')||{}).value||'retail';
-      var fee = ((document.getElementById('mr-fee')||{}).value||'').trim();
+      var category = isEvent ? 'event' : ((document.getElementById('mr-category')||{}).value||'retail');
+      var fee = isEvent ? '' : ((document.getElementById('mr-fee')||{}).value||'').trim();
       var email = ((document.getElementById('mr-email')||{}).value||'').trim();
       var memo = ((document.getElementById('mr-memo')||{}).value||'').trim();
-      if(!shop){showToast('屋号を入力してください','warn');return;}
+      if(isEvent && !name){showToast('参加者名を入力してください','warn');return;}
+      if(!isEvent && !shop){showToast('屋号を入力してください','warn');return;}
       var placeholderEmail = email || ('manual_'+Date.now()+'@mikkeruu.local');
       var id = 'manual-'+Date.now();
       var appData = {id:id,eventId:localEventId,shopName:shop,personName:name||shop,
@@ -2533,11 +2558,13 @@
         if(res.error){
           showToast('Supabase保存エラー：'+res.error.message,'warn');
         } else {
-          showToast(shop+' を出店確定で登録しました','success');
+          var label = isEvent ? name : shop;
+          showToast(label+' を'+(isEvent?'参加':'出店')+'確定で登録しました','success');
           if(typeof loadAdminApplicationsFromSupabase==='function') loadAdminApplicationsFromSupabase({silent:true});
         }
       } else {
-        showToast(shop+' をローカルに登録しました','success');
+        var label = isEvent ? name : shop;
+        showToast(label+' をローカルに登録しました','success');
       }
       var shEl = document.getElementById('sheet');
       if(shEl) shEl.classList.remove('open');
