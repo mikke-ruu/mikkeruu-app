@@ -2318,10 +2318,17 @@
     }
 
     // イベントを Supabase events テーブルに保存（insert or update）
-    // 成功時は true、失敗時は false を返す
+    // 成功時は true、失敗時はエラー文字列を返す
     async function saveEventToSupabase(ev){
       var sb = getSupabaseClient();
-      if(!sb) return false;
+      if(!sb) return 'Supabase未接続';
+      // ログインセッション確認（未ログインだとRLSで拒否される）
+      try{
+        var sess = await sb.auth.getSession();
+        if(!sess || !sess.data || !sess.data.session){
+          return '管理者ログインしていません（ログイン後に保存してください）';
+        }
+      }catch(se){ /* セッション取得失敗は続行してDBエラーに委ねる */ }
       var startsAt = ev.date ? ev.date+'T'+(ev.startTime||'10:00')+':00+09:00' : null;
       var endsAt   = ev.date ? ev.date+'T'+(ev.endTime  ||'17:00')+':00+09:00' : null;
       var payload = {
@@ -2360,8 +2367,9 @@
         }
         return true;
       }catch(e){
-        console.warn('Supabase event save failed:', e.message||e);
-        return false;
+        var msg = (e && (e.message||e.hint||e.details)) ? (e.message||e.hint||e.details) : 'エラー';
+        console.warn('Supabase event save failed:', e);
+        return msg;
       }
     }
 
@@ -10877,12 +10885,12 @@ mikke.ruu2025@gmail.com`,
         closeSheet(true);
         // Supabase に書き込み（非同期・失敗してもUIは閉じる）
         if(getSupabaseClient()){
-          saveEventToSupabase(ev).then(function(ok){
-            if(ok){
+          saveEventToSupabase(ev).then(function(result){
+            if(result===true){
               showToast('クラウドにも保存しました（他の端末・公開ページに反映されます）','success');
               if(typeof refreshAdminDashboardEventSelector==='function') refreshAdminDashboardEventSelector();
             }else{
-              showToast('⚠ クラウド保存に失敗しました。管理者ログイン中か確認してください（この端末にのみ保存されています）','warn');
+              showToast('⚠ クラウド保存に失敗：'+result,'warn');
             }
           });
         }
