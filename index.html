@@ -2470,31 +2470,28 @@
     }
     function openManualExhibitorSheet(kind){
       var isEvent = kind === 'event';
-      var ev = null;
-      var evLabel = '';
+      var list = (EVENTS||[]).filter(function(e){
+        return isEvent ? isParticipantOnlyEvent(e) : !isParticipantOnlyEvent(e);
+      });
+      if(!list.length){
+        showToast(isEvent ? '参加募集イベントがありません' : '対象バザールがありません','warn');
+        return;
+      }
+      var defId = '';
       if(isEvent){
         var sel = document.getElementById('admin-event-only-selector');
-        var evId = sel ? sel.value : '';
-        ev = evId ? (EVENTS||[]).find(function(e){return e.id===evId;}) : null;
-        if(!ev){showToast('参加募集イベントを選んでください','warn');return;}
-        evLabel = ev.name || evLabel;
+        defId = sel && sel.value ? sel.value : list[0].id;
       } else {
         var dashEv = typeof getCurrentDashboardEvent==='function' ? getCurrentDashboardEvent() : null;
-        if(!dashEv||!dashEv.key){showToast('対象バザールを選んでください','warn');return;}
-        ev = (EVENTS||[]).find(function(e){return e.id===dashEv.key;});
-        if(!ev){showToast('イベント情報が見つかりません','warn');return;}
-        evLabel = dashEv.label;
+        defId = dashEv && dashEv.key ? dashEv.key : list[0].id;
       }
-      var sid = ev.supabaseId||'';
-      var feeOpts = ev.feeOptions||[];
-      var feeBlock = isEvent ? '' :
-        '<label style="font-size:11px;font-weight:900;color:var(--sub)">出店料区分'
-        +(feeOpts.length>0
-          ? '<select class="input" id="mr-fee" style="margin-top:4px">'+feeOpts.map(function(f){
-              return '<option value="'+h(f.label)+'">'+h(f.label)+'（¥'+(f.yen||0).toLocaleString()+'）</option>';
-            }).join('')+'</select>'
-          : '<input class="input" id="mr-fee" placeholder="例：UW会員" style="margin-top:4px">')
-        +'</label>';
+      if(!list.find(function(e){return e.id===defId;})) defId = list[0].id;
+      var eventOptions = list.map(function(e){
+        var dt = (typeof formatEvDateShort==='function') ? formatEvDateShort(e) : '';
+        return '<option value="'+e.id+'"'+(e.id===defId?' selected':'')+'>'+h((dt?dt+' ':'')+(e.name||''))+'</option>';
+      }).join('');
+      var eventBlock = '<label style="font-size:11px;font-weight:900;color:var(--sub)">対象'+(isEvent?'イベント':'バザール')+' <span style="color:var(--ruu)">必須</span>'
+        +'<select class="input" id="mr-event" style="margin-top:4px"'+(isEvent?'':' onchange="updateManualFeeOptions()"')+'>'+eventOptions+'</select></label>';
       var categoryBlock = isEvent ? '' :
         '<label style="font-size:11px;font-weight:900;color:var(--sub)">カテゴリー'
         +'<select class="input" id="mr-category" style="margin-top:4px">'
@@ -2503,29 +2500,48 @@
         +'<option value="session">セッション</option>'
         +'<option value="treatment">施術</option>'
         +'</select></label>';
+      var feeBlock = isEvent ? '' :
+        '<label style="font-size:11px;font-weight:900;color:var(--sub)">出店料区分'
+        +'<select class="input" id="mr-fee" style="margin-top:4px"></select></label>';
       var shopBlock = isEvent ? '' :
         '<label style="font-size:11px;font-weight:900;color:var(--sub)">屋号 / ショップ名 <span style="color:var(--ruu)">必須</span>'
         +'<input class="input" id="mr-shop" placeholder="例：ハンドメイドサクラ" style="margin-top:4px"></label>';
       var nameLabel = isEvent ? '参加者名 <span style="color:var(--ruu)">必須</span>' : '担当者名（省略可）';
-      var namePlaceholder = isEvent ? '例：田中 花子' : '例：田中 花子';
       var btnLabel = isEvent ? '参加確定で登録する' : '出店確定で登録する';
       var sheetTitle = isEvent ? '参加者を手動登録' : '出店者を手動登録';
       var body = '<div style="display:flex;flex-direction:column;gap:14px">'
+        +eventBlock
         +shopBlock
         +'<label style="font-size:11px;font-weight:900;color:var(--sub)">'+nameLabel
-        +'<input class="input" id="mr-name" placeholder="'+namePlaceholder+'" style="margin-top:4px"></label>'
+        +'<input class="input" id="mr-name" placeholder="例：田中 花子" style="margin-top:4px"></label>'
         +categoryBlock
         +feeBlock
         +'<label style="font-size:11px;font-weight:900;color:var(--sub)">メールアドレス（省略可）'
         +'<input class="input" id="mr-email" type="email" placeholder="例：hanako@example.com（入れるとログイン・確定メール可）" style="margin-top:4px"></label>'
         +'<label style="font-size:11px;font-weight:900;color:var(--sub)">メモ（任意）'
         +'<input class="input" id="mr-memo" placeholder="例：LINE招待済み、備考など" style="margin-top:4px"></label>'
-        +'<button class="primary" type="button" onclick="submitManualExhibitor(\''+ev.id+'\',\''+sid+'\',\''+kind+'\')" style="margin-top:4px">'+btnLabel+'</button>'
+        +'<button class="primary" type="button" onclick="submitManualExhibitor(\''+kind+'\')" style="margin-top:4px">'+btnLabel+'</button>'
         +'</div>';
-      openSheet(sheetTitle, evLabel, body);
+      openSheet(sheetTitle, '', body);
+      if(!isEvent) updateManualFeeOptions();
     }
-    async function submitManualExhibitor(localEventId, supabaseEventId, kind){
+    function updateManualFeeOptions(){
+      var sel = document.getElementById('mr-event');
+      var feeSel = document.getElementById('mr-fee');
+      if(!sel || !feeSel) return;
+      var ev = (EVENTS||[]).find(function(e){return e.id===sel.value;});
+      var feeOpts = (ev && ev.feeOptions) ? ev.feeOptions : [];
+      feeSel.innerHTML = feeOpts.length>0
+        ? feeOpts.map(function(f){ return '<option value="'+h(f.label)+'">'+h(f.label)+'（¥'+(f.yen||0).toLocaleString()+'）</option>'; }).join('')
+        : '<option value="">（区分なし）</option>';
+    }
+    async function submitManualExhibitor(kind){
       var isEvent = kind === 'event';
+      var evSel = document.getElementById('mr-event');
+      var localEventId = evSel ? evSel.value : '';
+      var targetEv = (EVENTS||[]).find(function(e){return e.id===localEventId;});
+      if(!targetEv){showToast('対象を選んでください','warn');return;}
+      var supabaseEventId = targetEv.supabaseId||'';
       var shop = isEvent ? '' : ((document.getElementById('mr-shop')||{}).value||'').trim();
       var name = ((document.getElementById('mr-name')||{}).value||'').trim();
       var category = isEvent ? 'event' : ((document.getElementById('mr-category')||{}).value||'retail');
