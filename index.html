@@ -1409,9 +1409,11 @@
       <section id="admin" class="page">
         <h1 class="page-title">主催者ページ</h1>
         <div class="admin-note-box" id="admin-global-login-box" style="display:none;text-align:left;margin-bottom:14px">
-          <b>管理者ログインが必要です</b><br>
-          <span class="helper">申込者の個人情報を守るため、管理者メールのマジックリンクでログインしてください。</span>
-          <button class="primary" type="button" onclick="sendAdminMagicLink()" style="margin-top:10px">管理者ログインメールを送る</button>
+          <b>主催者ログイン</b><br>
+          <span class="helper">申込者の個人情報を守るため、パスワードでログインしてください。</span>
+          <input class="input" id="admin-login-pwd" type="password" placeholder="パスワード" autocomplete="current-password" style="margin-top:10px">
+          <button class="primary" type="button" onclick="adminPasswordLogin()" style="margin-top:10px">ログイン</button>
+          <button type="button" onclick="sendAdminPasswordSetup()" style="margin-top:8px;background:none;border:none;color:var(--ruu);font-size:12px;font-weight:800;text-decoration:underline;cursor:pointer;padding:4px">初回の方・パスワードを忘れた方はこちら</button>
         </div>
         <button class="primary" onclick="openNewEventSheet()" style="width:100%;margin-bottom:16px"><svg class="icon"><use href="#i-calendar"/></svg>イベントを作成する</button>
 
@@ -1611,9 +1613,8 @@
             <option value="party-tbd">交流会未定</option>
           </select>
           <div class="admin-note-box" id="admin-login-box" style="display:none;text-align:left">
-            <b>管理者ログインが必要です</b><br>
-            <span class="helper">申込者の個人情報を守るため、管理者メールのマジックリンクでログインしてください。</span>
-            <button class="primary" type="button" onclick="sendAdminMagicLink()" style="margin-top:10px">管理者ログインメールを送る</button>
+            <b>主催者ログインが必要です</b><br>
+            <span class="helper">主催者ページのトップでパスワードを入力してログインしてください。</span>
           </div>
           <div class="admin-app-list" id="admin-app-list"></div>
           <p class="helper" id="admin-app-empty" style="text-align:center;padding:24px 0">申込データはありません。</p>
@@ -2059,7 +2060,15 @@
           if(!session && authRes && authRes.data && authRes.data.user){
             session = {user: authRes.data.user};
           }
+          var isRecovery = params.get('type') === 'recovery';
           if(await syncProfileFromSupabaseSession(session)){
+            if(isRecovery){
+              history.replaceState(null, '', location.pathname + '#admin');
+              showPage('admin', true);
+              renderAll();
+              if(typeof showSetAdminPasswordSheet==='function') showSetAdminPasswordSheet();
+              return true;
+            }
             history.replaceState(null, '', location.pathname + '#mypage');
             showPage('mypage', true);
             renderAll();
@@ -2387,6 +2396,68 @@
         showToast(msg.indexOf('rate') >= 0 ? 'メール送信上限に達しています。少し時間を置いて再度お試しください。' : 'ログインメール送信エラー：' + msg, 'warn');
       }
     }
+    var ADMIN_EMAIL = 'mikke.ruu2025@gmail.com';
+    async function adminPasswordLogin(){
+      var sb = getSupabaseClient();
+      if(!sb){ showToast('Supabase接続を確認できません。','warn'); return; }
+      var pwd = ((document.getElementById('admin-login-pwd')||{}).value||'').trim();
+      if(!pwd){ showToast('パスワードを入力してください','warn'); return; }
+      try{
+        var res = await sb.auth.signInWithPassword({ email: ADMIN_EMAIL, password: pwd });
+        if(res.error) throw res.error;
+        await refreshSupabaseAdminRole();
+        if(CURRENT_USER_ROLE === 'admin'){
+          var el=document.getElementById('admin-login-pwd'); if(el) el.value='';
+          renderAdminLoginState();
+          if(typeof loadAdminApplicationsFromSupabase==='function') loadAdminApplicationsFromSupabase({silent:true});
+          if(typeof loadAdminMailLogsFromSupabase==='function') loadAdminMailLogsFromSupabase({silent:true});
+          showToast('ログインしました','success');
+        } else {
+          showToast('このアカウントには管理者権限がありません','warn');
+        }
+      }catch(e){
+        var msg=(e&&e.message)||'';
+        showToast(/invalid login/i.test(msg) ? 'パスワードが違います' : ('ログインエラー：'+(msg||'失敗')),'warn');
+      }
+    }
+    async function sendAdminPasswordSetup(){
+      var sb = getSupabaseClient();
+      if(!sb){ showToast('Supabase接続を確認できません。','warn'); return; }
+      try{
+        var res = await sb.auth.resetPasswordForEmail(ADMIN_EMAIL, { redirectTo: getAppBaseUrl()+'#admin' });
+        if(res.error) throw res.error;
+        showToast('パスワード設定メールを送りました。Gmailのリンクから設定してください。','success');
+      }catch(e){
+        var msg=(e&&e.message)||'送信できませんでした';
+        showToast(/rate/i.test(msg) ? 'メール送信上限です。少し待って再度お試しください。' : ('送信エラー：'+msg),'warn');
+      }
+    }
+    function showSetAdminPasswordSheet(){
+      openSheet('新しいパスワードを設定','主催者ログイン用のパスワードを決めてください',
+        '<div style="display:flex;flex-direction:column;gap:12px">'+
+        '<label style="font-size:11px;font-weight:900;color:var(--sub)">新しいパスワード<input class="input" id="set-pwd-new" type="password" placeholder="6文字以上" autocomplete="new-password" style="margin-top:4px"></label>'+
+        '<label style="font-size:11px;font-weight:900;color:var(--sub)">確認<input class="input" id="set-pwd-confirm" type="password" placeholder="もう一度" autocomplete="new-password" style="margin-top:4px"></label>'+
+        '<button class="primary" type="button" onclick="saveNewAdminPassword()">パスワードを設定する</button>'+
+        '</div>');
+    }
+    async function saveNewAdminPassword(){
+      var sb = getSupabaseClient();
+      if(!sb){ showToast('Supabase接続を確認できません。','warn'); return; }
+      var nw=((document.getElementById('set-pwd-new')||{}).value||'').trim();
+      var cf=((document.getElementById('set-pwd-confirm')||{}).value||'').trim();
+      if(nw.length<6){ showToast('6文字以上にしてください','warn'); return; }
+      if(nw!==cf){ showToast('パスワードが一致しません','warn'); return; }
+      try{
+        var res = await sb.auth.updateUser({ password: nw });
+        if(res.error) throw res.error;
+        var shEl=document.getElementById('sheet'); if(shEl) shEl.classList.remove('open');
+        await refreshSupabaseAdminRole();
+        renderAdminLoginState();
+        showToast('パスワードを設定しました','success');
+      }catch(e){
+        showToast('設定エラー：'+((e&&e.message)||'失敗'),'warn');
+      }
+    }
     async function loadAdminApplicationsFromSupabase(options){
       var opts = options && typeof options === 'object' ? options : {};
       var silent = !!opts.silent;
@@ -2464,7 +2535,7 @@
       var apps = Array.isArray(APPLICATIONS) ? APPLICATIONS : [];
       if(getSupabaseClient()){
         if(CURRENT_USER_ROLE !== 'admin') return [];
-        return apps.filter(function(app){ return app && app.source === 'supabase'; });
+        return apps.filter(function(app){ return app && (app.source === 'supabase' || app.source === 'manual'); });
       }
       return apps;
     }
@@ -2552,16 +2623,34 @@
       if(!isEvent && !shop){showToast('屋号を入力してください','warn');return;}
       var placeholderEmail = email || ('manual_'+Date.now()+'@mikkeruu.local');
       var id = 'manual-'+Date.now();
-      var appData = {id:id,eventId:localEventId,shopName:shop,personName:name||shop,
-        category:category,feeLabel:fee,memo:memo,email:placeholderEmail,status:'confirmed',isManual:true};
+      var content = '';
+      if(!isEvent && fee) content = '出店料区分：'+fee;
+      if(memo) content = content ? content+' / メモ：'+memo : 'メモ：'+memo;
+      var appData = {
+        id:id, supabaseId:'', person:'', user_id:'',
+        event:localEventId,
+        status:'confirmed',
+        line:'0', eyecatch:'0', eyecatchImage:'',
+        category: isEvent ? 'event' : category,
+        party:'tbd', first:'first',
+        personname: name || shop,
+        shopname: isEvent ? (name||'') : (shop || name || ''),
+        feeplan: isEvent ? 'event-fee' : '',
+        email: placeholderEmail,
+        kana:'', member:'', uwid:'', achiever:'', social:'',
+        content: content,
+        attendeeCount: 1,
+        comment:'', adminRequest: memo||'',
+        createdAt: (typeof datePartFromIso==='function' ? datePartFromIso(new Date().toISOString()) : ''),
+        isManual:true,
+        source:'manual'
+      };
       if(typeof APPLICATIONS!=='undefined') APPLICATIONS.push(appData);
       if(typeof renderApplications==='function') renderApplications();
       if(typeof markStateDirty==='function') markStateDirty();
       if(typeof saveAppState==='function') saveAppState();
       var sb = typeof getSupabaseClient==='function' ? getSupabaseClient() : null;
       if(sb && supabaseEventId){
-        var content = fee ? '出店料区分：'+fee : '';
-        if(memo) content = content ? content+' / メモ：'+memo : 'メモ：'+memo;
         var res = await sb.from('applications').insert({
           event_id: supabaseEventId,
           email: placeholderEmail,
@@ -2591,6 +2680,14 @@
         var el = document.getElementById(id);
         if(el) el.style.display = needsLogin ? '' : 'none';
       });
+      var adminSection = document.getElementById('admin');
+      if(adminSection){
+        Array.prototype.forEach.call(adminSection.children, function(child){
+          if(child.id === 'admin-global-login-box') return;
+          if(child.tagName === 'H1') return;
+          child.style.display = needsLogin ? 'none' : '';
+        });
+      }
     }
     function seedRealTestDataOnce(){
       if(localStorage.getItem(REAL_SEED_KEY)==='1') return;
@@ -2786,8 +2883,8 @@
       }, 80);
     }
     // 管理画面パスワード保護
-    var ADMIN_PASSWORD = (function(){ try{ return localStorage.getItem('mikke_admin_pwd')||'mikke2026'; }catch(e){ return 'mikke2026'; } })();
-    var ADMIN_PASSWORD_REQUIRED = true;
+    var ADMIN_PASSWORD = 'mikke2026'; // 旧ローカルゲート（未使用・Supabaseパスワード認証へ移行済み）
+    var ADMIN_PASSWORD_REQUIRED = false;
     var __adminAuthed = false;
     function showAdminLogin(){
       openSheet('主催者ページにログイン','安全のためパスワードが必要です',
@@ -2823,26 +2920,39 @@
         if(input){input.value='';input.focus()}
       }
     }
-    function logoutAdmin(){
+    async function logoutAdmin(){
       __adminAuthed = false;
       sessionStorage.removeItem('mikke_admin_auth');
+      var sb = getSupabaseClient();
+      if(sb){
+        try{ await sb.auth.signOut(); }catch(e){}
+      }
+      CURRENT_USER_ROLE = 'general';
+      if(typeof renderAdminLoginState==='function') renderAdminLoginState();
       showToast('ログアウトしました');
       showPage('home', true);
     }
-    function changeAdminPassword(){
+    async function changeAdminPassword(){
+      var sb = getSupabaseClient();
+      if(!sb){ showToast('Supabase接続を確認できません。','warn'); return; }
       var cur = ((document.getElementById('org-pwd-current')||{}).value||'').trim();
       var nw  = ((document.getElementById('org-pwd-new')||{}).value||'').trim();
       var cnf = ((document.getElementById('org-pwd-confirm')||{}).value||'').trim();
       if(!cur||!nw||!cnf){showToast('すべての欄を入力してください','warn');return;}
-      if(cur !== ADMIN_PASSWORD){showToast('現在のパスワードが違います','warn');return;}
       if(nw.length < 6){showToast('新しいパスワードは6文字以上にしてください','warn');return;}
       if(nw !== cnf){showToast('新しいパスワードが一致しません','warn');return;}
-      ADMIN_PASSWORD = nw;
-      try{localStorage.setItem('mikke_admin_pwd', nw);}catch(e){}
-      ['org-pwd-current','org-pwd-new','org-pwd-confirm'].forEach(function(id){
-        var el=document.getElementById(id); if(el) el.value='';
-      });
-      showToast('パスワードを変更しました','success');
+      try{
+        var check = await sb.auth.signInWithPassword({ email: ADMIN_EMAIL, password: cur });
+        if(check.error){ showToast('現在のパスワードが違います','warn'); return; }
+        var res = await sb.auth.updateUser({ password: nw });
+        if(res.error) throw res.error;
+        ['org-pwd-current','org-pwd-new','org-pwd-confirm'].forEach(function(id){
+          var el=document.getElementById(id); if(el) el.value='';
+        });
+        showToast('パスワードを変更しました','success');
+      }catch(e){
+        showToast('変更エラー：'+((e&&e.message)||'失敗'),'warn');
+      }
     }
 
     function showPage(id, rootNav){
@@ -2863,6 +2973,7 @@
       var target=document.getElementById(id);
       if(target){target.classList.add('active')}
       if(id === 'admin'){
+        if(typeof renderAdminLoginState==='function') renderAdminLoginState();
         if(typeof window.refreshAdminDashboardEventSelector==='function'){
           window.refreshAdminDashboardEventSelector();
         }
