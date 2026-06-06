@@ -2209,6 +2209,7 @@
     }
     function mapSupabaseEventRow(row){
       var date = datePartFromIso(row.starts_at);
+      var ex = (row.extra && typeof row.extra === 'object') ? row.extra : {};
       return {
         id: row.slug || row.id,
         supabaseId: row.id,
@@ -2234,7 +2235,15 @@
         feeOptions: Array.isArray(row.fee_options) ? row.fee_options : [],
         capacities: row.capacities || {},
         status: row.status === 'draft' ? 'draft' : 'public',
-        party: {enabled:false},
+        // extra(JSON)から復元する細かい項目
+        recruitStart: ex.recruitStart || '',
+        eyecatchDeadline: ex.eyecatchDeadline || '',
+        zoomDate: ex.zoomDate || '',
+        zoomTime: ex.zoomTime || '',
+        zoomId: ex.zoomId || '',
+        zoomPass: ex.zoomPass || '',
+        payment: ex.payment || '当日現金',
+        party: (ex.party && typeof ex.party === 'object') ? ex.party : {enabled:false},
         source: 'supabase'
       };
     }
@@ -2243,7 +2252,7 @@
       if(!sb) return false;
       try{
         var res = await sb.from('events')
-          .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,content,detail,cover_image_url,gallery_image_urls,line_group_url,capacity,application_deadline,fee_options,capacities')
+          .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,content,detail,cover_image_url,gallery_image_urls,line_group_url,capacity,application_deadline,fee_options,capacities,extra')
           .in('status', ['public','closed','past'])
           .order('starts_at', {ascending:true});
         // 新カラム未追加の旧DB向けフォールバック
@@ -2354,7 +2363,17 @@
         capacity:             ev.capacity || 0,
         application_deadline: ev.deadline || null,
         fee_options:          ev.feeOptions || [],
-        capacities:           ev.capacities || {}
+        capacities:           ev.capacities || {},
+        extra: {
+          recruitStart:     ev.recruitStart || '',
+          eyecatchDeadline: ev.eyecatchDeadline || '',
+          zoomDate:         ev.zoomDate || '',
+          zoomTime:         ev.zoomTime || '',
+          zoomId:           ev.zoomId || '',
+          zoomPass:         ev.zoomPass || '',
+          payment:          ev.payment || '',
+          party:            ev.party || {enabled:false}
+        }
       };
       try{
         if(ev.supabaseId){
