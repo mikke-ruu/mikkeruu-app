@@ -2214,7 +2214,7 @@
         supabaseId: row.id,
         slug: row.slug || '',
         kind: row.kind === 'event' ? 'イベント' : 'バザール',
-        content: row.detail || '',
+        content: row.content || '',
         detail: row.detail || '',
         name: row.title || row.short_title || '名称未設定',
         date: date,
@@ -2243,7 +2243,7 @@
       if(!sb) return false;
       try{
         var res = await sb.from('events')
-          .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,detail,cover_image_url,gallery_image_urls,line_group_url,capacity,application_deadline,fee_options,capacities')
+          .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,content,detail,cover_image_url,gallery_image_urls,line_group_url,capacity,application_deadline,fee_options,capacities')
           .in('status', ['public','closed','past'])
           .order('starts_at', {ascending:true});
         // 新カラム未追加の旧DB向けフォールバック
@@ -2346,7 +2346,8 @@
         venue:                ev.venue || '',
         address:              ev.address || '',
         map_url:              ev.mapUrl || '',
-        detail:               ev.detail || ev.content || '',
+        content:              ev.content || '',
+        detail:               ev.detail || '',
         cover_image_url:      ev.coverImage || '',
         gallery_image_urls:   ev.flyerImages || [],
         line_group_url:       ev.lineGroupUrl || ev.lineUrl || '',
@@ -3610,11 +3611,15 @@
       if(t5) t5.textContent = isEventApply ? '交流会情報' : '交流会に参加しますか？';
       setDisplay('apply-event-step1', isEventApply && applyStep===2, 'grid');
       setDisplay('apply-basic-step1', !isEventApply || applyStep===1, 'block');
-      // 出店募集要項（旧detail表示）は廃止。detailは一般向け文章として公開詳細ページのみに表示する。
+      // 出店募集要項（detail）は出店申込者向けに申込STEP1で表示。一般向けの短文(content)は公開詳細ページの「内容」に表示。
       var bazaarDetailEl = document.getElementById('apply-bazaar-detail');
       if(bazaarDetailEl){
-        bazaarDetailEl.innerHTML = '';
-        bazaarDetailEl.style.display = 'none';
+        if(!isEventApply && ev && ev.detail && applyStep===1){
+          bazaarDetailEl.innerHTML = '<b style="font-size:15px">出店募集要項</b><span style="white-space:pre-wrap;word-break:break-word">'+h(ev.detail)+'</span>';
+          bazaarDetailEl.style.display = 'grid';
+        } else {
+          bazaarDetailEl.style.display = 'none';
+        }
       }
       setDisplay('apply-bazaar-step2', !isEventApply);
       setDisplay('apply-event-step2', isEventApply, 'grid');
@@ -5774,7 +5779,7 @@
             (ev.venue?'<span><svg class="icon"><use href="#i-map"/></svg> '+ev.venue+'</span>':'')+
             (ev.address?'<span><svg class="icon"><use href="#i-map"/></svg> <a href="javascript:void(0)" onclick="openMap(this);return false;" data-address="'+(ev.address||'').replace(/"/g,'&quot;')+'" data-mapurl="'+(ev.mapUrl||'').replace(/"/g,'&quot;')+'" style="color:var(--ink);text-decoration:underline;text-underline-offset:2px">'+ev.address+'</a></span>':'')+
           '</div>'+
-          (ev.detail ?'<div style="margin-top:12px"><p class="filter-label" style="margin:0 0 4px">内容</p><p class="helper" style="margin:0;white-space:pre-wrap;word-break:break-word">'+h(ev.detail)+'</p></div>':'')+
+          (ev.content ?'<div style="margin-top:12px"><p class="filter-label" style="margin:0 0 4px">内容</p><p class="helper" style="margin:0;white-space:pre-wrap;word-break:break-word">'+h(ev.content)+'</p></div>':'')+
           '<div class="actions application-actions">'+partyApplyBtn+applyBtn+'</div>'+
         '</article>'+
         sectionBottomHtml;
