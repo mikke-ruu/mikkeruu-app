@@ -2845,6 +2845,32 @@
       markStateDirty();
       saveAppState();
     }
+    function purgeSeedDataOnce(){
+      // テスト用シード（仮データ）を削除し、以後は再投入しない（Supabaseの実データのみで運用）
+      var isSeedId = function(id){ return typeof id==='string' && id.indexOf('seed-')===0; };
+      var changed = false;
+      if(Array.isArray(EVENTS)){
+        var beforeE = EVENTS.length;
+        EVENTS = EVENTS.filter(function(e){ return !(e && isSeedId(e.id)); });
+        if(EVENTS.length !== beforeE) changed = true;
+      }
+      if(Array.isArray(APPLICATIONS)){
+        var beforeA = APPLICATIONS.length;
+        APPLICATIONS = APPLICATIONS.filter(function(a){
+          return !(a && (isSeedId(a.event) || isSeedId(a.id)));
+        });
+        if(APPLICATIONS.length !== beforeA) changed = true;
+      }
+      if(Array.isArray(PARTY_APPLICATIONS)){
+        var beforeP = PARTY_APPLICATIONS.length;
+        PARTY_APPLICATIONS = PARTY_APPLICATIONS.filter(function(p){
+          return !(p && (isSeedId(p.event) || isSeedId(p.eventId)));
+        });
+        if(PARTY_APPLICATIONS.length !== beforeP) changed = true;
+      }
+      try{ localStorage.setItem(REAL_SEED_KEY, '1'); }catch(e){}
+      if(changed){ markStateDirty(); saveAppState(); }
+    }
     setInterval(function(){if(__stateDirty) saveAppState();}, 1500);
     window.addEventListener('beforeunload', saveAppState);
     function scrollAppTop(){
@@ -7119,7 +7145,7 @@ mikke.ruu2025@gmail.com`,
       var badge = getEventStatusBadge(ev);
       var iso = normalizeDateInput(ev.date);
       var dateLabel = iso ? formatEvDateShort({date:iso, dayOfWeek:(ev.dayOfWeek||computeDayOfWeek(iso)||'')}) : '日付未設定';
-      var apps = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card')).filter(function(c){return c.dataset.event===ev.id;});
+      var apps = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card')).filter(function(c){return c.dataset.event===ev.id || (ev.supabaseId && c.dataset.event===ev.supabaseId);});
       var applied = apps.filter(function(c){return c.dataset.status==='new' || c.dataset.status==='confirmed';}).length;
       var confirmed = apps.filter(function(c){return c.dataset.status==='confirmed';}).length;
       var cap = getEventCapacityTotal(ev)||0;
@@ -10911,7 +10937,7 @@ mikke.ruu2025@gmail.com`,
     // 初期化
     document.addEventListener('DOMContentLoaded', function(){
       loadAppState();
-      seedRealTestDataOnce();
+      purgeSeedDataOnce();
       ensureVisitorReceptionSurveyTemplateOnce();
       ensureExhibitorAnonymousSurveyTemplateOnce();
       clearSurveyPlaceholdersOnce();
