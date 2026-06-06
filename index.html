@@ -1549,6 +1549,7 @@
           <p class="admin-menu-label"><svg class="icon" style="width:13px;height:13px;color:var(--sub)"><use href="#i-settings"/></svg>共通</p>
           <div class="admin-action-grid">
             <button onclick="toggleAdminPanel('admin-notice')"><svg class="icon"><use href="#i-bell"/></svg>お知らせ</button>
+            <button onclick="toggleAdminPanel('admin-mail-logs')"><svg class="icon"><use href="#i-file"/></svg>メールログ</button>
             <button onclick="toggleAdminPanel('admin-faq')"><svg class="icon"><use href="#i-help"/></svg>FAQ</button>
             <button onclick="toggleAdminPanel('admin-archive-edit')"><svg class="icon"><use href="#i-camera"/></svg>アルバム</button>
             <button onclick="toggleAdminPanel('admin-template')"><svg class="icon"><use href="#i-file"/></svg>定型文</button>
@@ -1694,6 +1695,20 @@
           <div id="admin-notice-list" class="admin-card-list">
             <!-- 動的に描画 -->
           </div>
+        </div>
+
+        <div id="admin-mail-logs" class="admin-panel">
+          <button class="admin-panel-back" onclick="closeAdminPanel(event)"><svg class="icon"><use href="#i-chevron"/></svg>戻る</button>
+          <div class="admin-panel-head">
+            <div><h3>メールログ</h3><p>確定メールの送信状況を確認します。失敗時は理由を見て設定を直せます。</p></div>
+            <span class="badge" id="admin-mail-count">0件</span>
+          </div>
+          <div class="admin-note-box" id="admin-mail-note"><b>確定メールの状態</b><br>送信済み・未送信・失敗をここで確認できます。</div>
+          <div class="admin-card-actions single-btn">
+            <button onclick="loadAdminMailLogsFromSupabase({silent:false})">メールログを更新</button>
+          </div>
+          <div id="admin-mail-list" class="admin-card-list"></div>
+          <p class="helper" id="admin-mail-empty" style="text-align:center;padding:24px 0">メールログはありません。</p>
         </div>
 
         <div id="admin-faq" class="admin-panel">
@@ -1964,6 +1979,7 @@
     var APPLY_TERMS_ACK = false;
     var APPLICATIONS = [];
     var PARTY_APPLICATIONS = [];
+    var MAIL_LOGS = [];
     var TEXT_SCALE_KEY = 'mikke_text_scale_v1';
     var __surveySubmitting = false;
     var APP_STATE_KEY = 'mikke_preview_state_v3';
@@ -1974,6 +1990,7 @@
     var SUPABASE_URL = 'https://eqmhrtbfkgccdksyokqk.supabase.co';
     var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVxbWhydGJma2djY2Rrc3lva3FrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTA3ODEsImV4cCI6MjA5NjEyNjc4MX0.1Uf_LbYkPqU3oDLK6hsncPSyLjfOkfg0tOo7n1yHcw0';
     var SUPABASE_CLIENT = null;
+    var SUPABASE_CONFIRM_NOTICE_PREFIX = 'supabase-confirm-';
     var __stateDirty = false;
     var __appsKindMode = 'all'; // 'all'|'bazaar'|'event'
     var __appsSummaryQuickFilter = null;
@@ -2102,6 +2119,7 @@
         events: Array.isArray(EVENTS) ? EVENTS : [],
         applications: Array.isArray(APPLICATIONS) ? APPLICATIONS : [],
         partyApplications: Array.isArray(PARTY_APPLICATIONS) ? PARTY_APPLICATIONS : [],
+        mailLogs: Array.isArray(MAIL_LOGS) ? MAIL_LOGS : [],
         notices: Array.isArray(NOTICES) ? NOTICES : [],
         albums: Array.isArray(ALBUMS) ? ALBUMS : [],
         templates: Array.isArray(TEMPLATES) ? TEMPLATES : [],
@@ -2131,6 +2149,7 @@
         if(Array.isArray(state.events)) EVENTS = state.events;
         if(Array.isArray(state.applications)) APPLICATIONS = state.applications;
         if(Array.isArray(state.partyApplications)) PARTY_APPLICATIONS = state.partyApplications;
+        if(Array.isArray(state.mailLogs)) MAIL_LOGS = state.mailLogs;
         if(Array.isArray(state.notices)) NOTICES = state.notices;
         if(Array.isArray(state.albums)) ALBUMS = state.albums;
         if(Array.isArray(state.templates)) TEMPLATES = state.templates;
@@ -2247,6 +2266,81 @@
         source: 'supabase'
       };
     }
+    function mapSupabaseNoticeRow(row){
+      var ev = (EVENTS||[]).find(function(item){return item.supabaseId===row.event_id || item.id===row.event_id;});
+      var channel = row.channel === 'individual' ? 'individual' : (row.channel === 'public' ? 'public' : 'event-exhibitors');
+      return {
+        id: row.id,
+        source: 'supabase',
+        channel: channel,
+        targetEvent: ev ? ev.id : (row.event_id || ''),
+        targetPerson: row.target_user_id || '',
+        targetUserId: row.target_user_id || '',
+        targetEmail: row.target_email || '',
+        title: row.title || '',
+        body: row.body || '',
+        image: row.image_url || '',
+        date: datePartFromIso(row.created_at) || todayStr(),
+        read: false
+      };
+    }
+    async function loadCurrentUserApplicationsFromSupabase(options){
+      var opts = options && typeof options === 'object' ? options : {};
+      var silent = !!opts.silent;
+      var sb = getSupabaseClient();
+      if(!sb) return false;
+      try{
+        var current = await sb.auth.getSession();
+        var session = current && current.data && current.data.session;
+        if(!session || !session.user || !CURRENT_USER_EMAIL) return false;
+        var res = await sb.from('applications')
+          .select('id,event_id,user_id,email,person_name,kana,shop_name,category,content,appeal,instagram,uword_id,attendee_count,status,eyecatch_image_url,admin_memo,created_at')
+          .order('created_at', {ascending:false});
+        if(res.error) throw res.error;
+        var remoteApps = (res.data||[]).map(mapSupabaseApplicationRow);
+        remoteApps.forEach(function(app){ upsertById(APPLICATIONS, app); });
+        refreshCurrentUserEventsByEmail(CURRENT_USER_EMAIL);
+        syncMypageProfileFromLatestApplication();
+        renderMypageEventCards();
+        renderMypageNotices();
+        markStateDirty();
+        saveAppState();
+        if(!silent && remoteApps.length) showToast('マイページの申込状況を更新しました', 'success');
+        return true;
+      }catch(e){
+        if(!silent) showToast('マイページ申込読み込みエラー：' + ((e&&e.message)||'読み込み失敗'), 'warn');
+        return false;
+      }
+    }
+    async function loadCurrentUserNoticesFromSupabase(options){
+      var opts = options && typeof options === 'object' ? options : {};
+      var silent = !!opts.silent;
+      var sb = getSupabaseClient();
+      if(!sb) return false;
+      try{
+        var current = await sb.auth.getSession();
+        var session = current && current.data && current.data.session;
+        if(!session || !session.user) return false;
+        var res = await sb.from('notices')
+          .select('id,channel,event_id,target_user_id,target_email,title,body,image_url,created_at')
+          .order('created_at', {ascending:false});
+        if(res.error) throw res.error;
+        (res.data||[]).map(mapSupabaseNoticeRow).forEach(function(n){
+          var existing = (NOTICES||[]).find(function(item){return item && item.id===n.id;});
+          if(existing) n.read = !!existing.read;
+          upsertById(NOTICES, n);
+        });
+        renderMypageNotices();
+        updateMypageNoticeCount();
+        markStateDirty();
+        saveAppState();
+        if(!silent && (res.data||[]).length) showToast('お知らせを更新しました', 'success');
+        return true;
+      }catch(e){
+        if(!silent) showToast('お知らせ読み込みエラー：' + ((e&&e.message)||'読み込み失敗'), 'warn');
+        return false;
+      }
+    }
     async function refreshSupabaseAdminRole(){
       var sb = getSupabaseClient();
       if(!sb) return false;
@@ -2323,6 +2417,38 @@
         return true;
       }catch(e){
         if(!silent) showToast('Supabase申込一覧エラー：' + ((e&&e.message)||'読み込み失敗'), 'warn');
+        return false;
+      }
+    }
+    async function loadAdminMailLogsFromSupabase(options){
+      var opts = options && typeof options === 'object' ? options : {};
+      var silent = !!opts.silent;
+      var sb = getSupabaseClient();
+      if(!sb){
+        renderAdminMailLogs();
+        return false;
+      }
+      try{
+        var isAdmin = await refreshSupabaseAdminRole();
+        if(!isAdmin){
+          MAIL_LOGS = [];
+          renderAdminMailLogs();
+          if(!silent) showToast('管理者ログイン後にメールログを確認できます。', 'warn');
+          return false;
+        }
+        var res = await sb.from('mail_logs')
+          .select('id,event_id,application_id,recipient_email,subject,template_key,status,provider_message_id,error,sent_at,created_at')
+          .order('created_at', {ascending:false})
+          .limit(50);
+        if(res.error) throw res.error;
+        MAIL_LOGS = res.data || [];
+        renderAdminMailLogs();
+        markStateDirty();
+        saveAppState();
+        if(!silent) showToast('メールログを更新しました（'+MAIL_LOGS.length+'件）', 'success');
+        return true;
+      }catch(e){
+        if(!silent) showToast('メールログ読み込みエラー：' + ((e&&e.message)||'読み込み失敗'), 'warn');
         return false;
       }
     }
@@ -3881,6 +4007,9 @@
           clearNoticeComposerForm(true);
           setNoticeComposerMode('new');
         }
+        if(id==='admin-mail-logs' && typeof loadAdminMailLogsFromSupabase==='function'){
+          loadAdminMailLogsFromSupabase({silent:true});
+        }
       }else{
         if(backdrop) backdrop.classList.remove('open');
       }
@@ -4188,6 +4317,110 @@
       document.querySelectorAll('#admin-applications .exhibitor-card.open').forEach(function(c){c.classList.remove('open');});
       if(!isOpen) card.classList.add('open');
     }
+    function getApplicationFromCard(card){
+      if(!card) return null;
+      var app = (APPLICATIONS||[]).find(function(item){
+        return item && (item.id===card.id || item.supabaseId===card.dataset.supabaseid);
+      });
+      if(app) return app;
+      return {
+        id: card.id || '',
+        supabaseId: card.dataset.supabaseid || '',
+        source: card.dataset.source || '',
+        event: card.dataset.event || '',
+        person: card.dataset.person || '',
+        user_id: card.dataset.person || '',
+        email: card.dataset.email || '',
+        personname: card.dataset.personname || '',
+        shopname: card.dataset.shopname || '',
+        category: card.dataset.category || '',
+        attendeeCount: parseInt(card.dataset.attendeecount||0,10)||1
+      };
+    }
+    function buildConfirmationNoticeText(app, ev){
+      var isEv = isParticipantOnlyEvent(ev) || (app && app.category==='event');
+      var title = isEv ? '参加が確定しました' : '出店が確定しました';
+      var body = (ev && ev.name ? ev.name + '\n' : '') +
+        (isEv ? 'イベントへの参加が確定しました。' : 'バザールへの出店が確定しました。') +
+        '\n当日の詳細や連絡事項は、このマイページのお知らせで順次ご案内します。';
+      if(ev && ev.lineUrl && !isEv){
+        body += '\n\nグループLINE: ' + ev.lineUrl;
+      }
+      return {title:title, body:body};
+    }
+    function upsertLocalConfirmationNotice(app, ev){
+      if(!app || !ev) return null;
+      var appKey = app.supabaseId || app.id || ((app.event||'') + '-' + (app.email||''));
+      var noticeId = SUPABASE_CONFIRM_NOTICE_PREFIX + appKey;
+      var text = buildConfirmationNoticeText(app, ev);
+      var existing = (NOTICES||[]).find(function(n){return n.id===noticeId;});
+      var notice = {
+        id: noticeId,
+        source: 'local-confirmation',
+        channel: 'individual',
+        targetEvent: ev.id,
+        targetPerson: app.user_id || app.person || '',
+        targetUserId: app.user_id || app.person || '',
+        targetEmail: app.email || '',
+        title: text.title,
+        body: text.body,
+        image: '',
+        date: todayStr(),
+        read: existing ? !!existing.read : false
+      };
+      upsertById(NOTICES, notice);
+      markStateDirty();
+      saveAppState();
+      renderMypageNotices();
+      updateMypageNoticeCount();
+      return notice;
+    }
+    async function queueSupabaseConfirmationArtifacts(card, app, ev, applicationId){
+      var sb = getSupabaseClient();
+      if(!sb || !app || !ev || !applicationId) return false;
+      var text = buildConfirmationNoticeText(app, ev);
+      var insertedSomething = false;
+      try{
+        var fnRes = await sb.functions.invoke('admin-confirm-application', {
+          body: {application_id: applicationId}
+        });
+        if(fnRes && !fnRes.error && fnRes.data && fnRes.data.ok){
+          showToast(fnRes.data.mail_status==='sent' ? '確定メールを送信しました' : '確定通知を作成しました。メールは送信キューを確認してください。', 'success');
+          return true;
+        }
+      }catch(e){}
+      try{
+        if(app.user_id || app.person || app.email){
+          var targetUserId = (app.user_id || app.person || '');
+          if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUserId)) targetUserId = null;
+          var noticeRes = await sb.from('notices').insert({
+            channel: 'individual',
+            event_id: ev.supabaseId || ev.id,
+            target_user_id: targetUserId,
+            target_email: app.email || null,
+            title: text.title,
+            body: text.body
+          });
+          if(noticeRes.error) throw noticeRes.error;
+          insertedSomething = true;
+        }
+      }catch(e){}
+      try{
+        if(app.email){
+          var mailRes = await sb.from('mail_logs').insert({
+            event_id: ev.supabaseId || ev.id,
+            application_id: applicationId,
+            recipient_email: app.email,
+            subject: text.title + ' - Mikkeruu',
+            template_key: 'application_confirmed',
+            status: 'queued'
+          });
+          if(mailRes.error) throw mailRes.error;
+          insertedSomething = true;
+        }
+      }catch(e){}
+      return insertedSomething;
+    }
     async function setAppStatus(cardId,status,btn){
       var card=document.getElementById(cardId);
       if(!card) return;
@@ -4268,10 +4501,21 @@
         if(res.error) throw res.error;
         var app = (APPLICATIONS||[]).find(function(item){return item.id===card.id;});
         if(app) app.status = dbStatus;
+        if(dbStatus==='confirmed' && previousStatus!=='confirmed'){
+          var appForNotice = app || getApplicationFromCard(card);
+          var evForNotice = (EVENTS||[]).find(function(item){
+            return item.id===card.dataset.event || item.supabaseId===card.dataset.event;
+          });
+          if(appForNotice && evForNotice){
+            upsertLocalConfirmationNotice(appForNotice, evForNotice);
+            queueSupabaseConfirmationArtifacts(card, appForNotice, evForNotice, targetId);
+          }
+        }
         markStateDirty();
         saveAppState();
         showToast(dbStatus==='confirmed' ? 'Supabaseでも確定に更新しました' : 'Supabaseの申込ステータスを更新しました', 'success');
         loadAdminApplicationsFromSupabase({silent:true});
+        if(dbStatus==='confirmed') loadAdminMailLogsFromSupabase({silent:true});
         return true;
       }catch(e){
         card.dataset.status = previousStatus || 'new';
@@ -7402,7 +7646,11 @@ mikke.ruu2025@gmail.com`,
       if(CURRENT_USER_ROLE!=='exhibitor') return false;
       if(n.channel==='exhibitors-all') return true; // 出店者向け（プロトタイプではログイン中ユーザーは出店者）
       if(n.channel==='event-exhibitors') return !!CURRENT_USER_EVENTS[n.targetEvent];
-      if(n.channel==='individual') return n.targetPerson===CURRENT_USER_ID;
+      if(n.channel==='individual'){
+        var targetEmail = String(n.targetEmail||'').trim().toLowerCase();
+        var myEmail = String(CURRENT_USER_EMAIL||'').trim().toLowerCase();
+        return n.targetPerson===CURRENT_USER_ID || (targetEmail && myEmail && targetEmail===myEmail);
+      }
       return false;
     }
 
@@ -7554,6 +7802,59 @@ mikke.ruu2025@gmail.com`,
           '<button onclick="editNotice(\''+n.id+'\')">編集</button>'+
           '<button onclick="deleteNotice(\''+n.id+'\')">削除</button>'+
         '</div></article>';
+      }).join('');
+    }
+    function getMailStatusBadgeClass(status){
+      return status==='sent' ? 'mint' : (status==='failed' ? 'orange' : '');
+    }
+    function getMailStatusLabel(status){
+      return status==='sent' ? '送信済み' : status==='failed' ? '失敗' : '送信待ち';
+    }
+    function getEventNameBySupabaseIdOrLocal(eventId){
+      if(!eventId) return 'イベント未設定';
+      var ev = (EVENTS||[]).find(function(item){return item.id===eventId || item.supabaseId===eventId;});
+      return ev ? ev.name : eventId;
+    }
+    function renderAdminMailLogs(){
+      var host = document.getElementById('admin-mail-list');
+      var empty = document.getElementById('admin-mail-empty');
+      var badge = document.getElementById('admin-mail-count');
+      var note = document.getElementById('admin-mail-note');
+      if(badge) badge.textContent = (MAIL_LOGS||[]).length + '件';
+      if(note){
+        var failed = (MAIL_LOGS||[]).filter(function(log){return log.status==='failed';}).length;
+        var queued = (MAIL_LOGS||[]).filter(function(log){return log.status==='queued';}).length;
+        note.innerHTML = '<b>確定メールの状態</b><br>' +
+          (failed ? '失敗が '+failed+' 件あります。失敗理由を確認してください。' :
+          queued ? '送信待ちが '+queued+' 件あります。Edge Function とメール設定を確認してください。' :
+          '直近ログに大きな問題はありません。');
+      }
+      if(!host) return;
+      var logs = Array.isArray(MAIL_LOGS) ? MAIL_LOGS : [];
+      if(!logs.length){
+        host.innerHTML = '';
+        if(empty) empty.style.display = '';
+        return;
+      }
+      if(empty) empty.style.display = 'none';
+      host.innerHTML = logs.map(function(log){
+        var status = log.status || 'queued';
+        var statusClass = getMailStatusBadgeClass(status);
+        var eventName = getEventNameBySupabaseIdOrLocal(log.event_id || '');
+        var date = datePartFromIso(log.sent_at || log.created_at) || '';
+        var error = log.error ? '<p style="color:#c84a4a;font-weight:850">理由：'+h(log.error)+'</p>' : '';
+        var provider = log.provider_message_id ? '<p>配信ID：'+h(log.provider_message_id)+'</p>' : '';
+        return '<article class="admin-work-card">'+
+          '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">'+
+            '<h4>'+h(log.subject||'件名未設定')+'</h4>'+
+            '<span class="badge '+statusClass+'">'+getMailStatusLabel(status)+'</span>'+
+          '</div>'+
+          '<p>宛先：'+h(log.recipient_email||'-')+'</p>'+
+          '<p>イベント：'+h(eventName)+'</p>'+
+          '<p>テンプレート：'+h(log.template_key||'-')+' / '+h(date)+'</p>'+
+          provider+
+          error+
+        '</article>';
       }).join('');
     }
 
@@ -10333,6 +10634,7 @@ mikke.ruu2025@gmail.com`,
       syncMypageProfileFromLatestApplication();
       renderMypageNotices();
       renderAdminNotices();
+      renderAdminMailLogs();
       renderUserFAQs();
       renderAdminFAQs();
       renderAdminTemplates();
@@ -10359,7 +10661,10 @@ mikke.ruu2025@gmail.com`,
       tryLoginByUrlToken();
       initSupabaseAuthFromUrl()
         .then(loadPublicEventsFromSupabase)
-        .then(function(){return loadAdminApplicationsFromSupabase({silent:true});});
+        .then(function(){return loadCurrentUserApplicationsFromSupabase({silent:true});})
+        .then(function(){return loadCurrentUserNoticesFromSupabase({silent:true});})
+        .then(function(){return loadAdminApplicationsFromSupabase({silent:true});})
+        .then(function(){return loadAdminMailLogsFromSupabase({silent:true});});
     });
     // 即実行も保険で
     setTimeout(renderAll, 100);
