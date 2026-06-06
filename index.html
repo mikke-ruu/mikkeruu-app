@@ -640,7 +640,7 @@
       .sheet-card{max-height:92vh;padding:16px 14px calc(24px + env(safe-area-inset-bottom))}
       .sheet-body{gap:12px}
       .admin-two-col,.ev-info-grid,.map-info-grid,.app-info-grid{grid-template-columns:1fr}
-      .event-data-summary{grid-template-columns:1fr}
+      .event-data-summary{grid-template-columns:repeat(2,1fr)}
       .sticky-form-actions{width:min(100%,440px);padding:8px 12px 10px}
       .apply-shell{padding-bottom:182px}
     }
@@ -10876,9 +10876,16 @@ mikke.ruu2025@gmail.com`,
         showToast('イベントを保存しました','success');
         closeSheet(true);
         // Supabase に書き込み（非同期・失敗してもUIは閉じる）
-        saveEventToSupabase(ev).then(function(ok){
-          if(!ok) console.warn('Supabase event write failed for', ev.id);
-        });
+        if(getSupabaseClient()){
+          saveEventToSupabase(ev).then(function(ok){
+            if(ok){
+              showToast('クラウドにも保存しました（他の端末・公開ページに反映されます）','success');
+              if(typeof refreshAdminDashboardEventSelector==='function') refreshAdminDashboardEventSelector();
+            }else{
+              showToast('⚠ クラウド保存に失敗しました。管理者ログイン中か確認してください（この端末にのみ保存されています）','warn');
+            }
+          });
+        }
       };
 
       // ファイルを Storage にアップロードし URL を返す
