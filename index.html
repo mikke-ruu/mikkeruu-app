@@ -3610,14 +3610,11 @@
       if(t5) t5.textContent = isEventApply ? '交流会情報' : '交流会に参加しますか？';
       setDisplay('apply-event-step1', isEventApply && applyStep===2, 'grid');
       setDisplay('apply-basic-step1', !isEventApply || applyStep===1, 'block');
+      // 出店募集要項（旧detail表示）は廃止。detailは一般向け文章として公開詳細ページのみに表示する。
       var bazaarDetailEl = document.getElementById('apply-bazaar-detail');
       if(bazaarDetailEl){
-        if(!isEventApply && ev && ev.detail && applyStep===1){
-          bazaarDetailEl.innerHTML = '<b style="font-size:15px">出店募集要項</b><span style="white-space:pre-wrap;word-break:break-word">'+h(ev.detail)+'</span>';
-          bazaarDetailEl.style.display = 'grid';
-        } else {
-          bazaarDetailEl.style.display = 'none';
-        }
+        bazaarDetailEl.innerHTML = '';
+        bazaarDetailEl.style.display = 'none';
       }
       setDisplay('apply-bazaar-step2', !isEventApply);
       setDisplay('apply-event-step2', isEventApply, 'grid');
@@ -5777,7 +5774,7 @@
             (ev.venue?'<span><svg class="icon"><use href="#i-map"/></svg> '+ev.venue+'</span>':'')+
             (ev.address?'<span><svg class="icon"><use href="#i-map"/></svg> <a href="javascript:void(0)" onclick="openMap(this);return false;" data-address="'+(ev.address||'').replace(/"/g,'&quot;')+'" data-mapurl="'+(ev.mapUrl||'').replace(/"/g,'&quot;')+'" style="color:var(--ink);text-decoration:underline;text-underline-offset:2px">'+ev.address+'</a></span>':'')+
           '</div>'+
-          (ev.detail && isEventOnly ?'<p class="helper" style="margin-top:12px;white-space:pre-wrap;word-break:break-word">'+h(ev.detail)+'</p>':'')+
+          (ev.detail ?'<div style="margin-top:12px"><p class="filter-label" style="margin:0 0 4px">内容</p><p class="helper" style="margin:0;white-space:pre-wrap;word-break:break-word">'+h(ev.detail)+'</p></div>':'')+
           '<div class="actions application-actions">'+partyApplyBtn+applyBtn+'</div>'+
         '</article>'+
         sectionBottomHtml;
