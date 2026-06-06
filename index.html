@@ -2424,7 +2424,7 @@
       var sb = getSupabaseClient();
       if(!sb){ showToast('Supabase接続を確認できません。','warn'); return; }
       try{
-        var res = await sb.auth.resetPasswordForEmail(ADMIN_EMAIL, { redirectTo: getAppBaseUrl()+'#admin' });
+        var res = await sb.auth.resetPasswordForEmail(ADMIN_EMAIL, { redirectTo: getAppBaseUrl() });
         if(res.error) throw res.error;
         showToast('パスワード設定メールを送りました。Gmailのリンクから設定してください。','success');
       }catch(e){
