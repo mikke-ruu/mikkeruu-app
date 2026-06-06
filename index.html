@@ -717,6 +717,9 @@
     .admin-more>summary .chev{transition:transform .2s}
     .admin-more[open]>summary .chev{transform:rotate(90deg)}
     .category-list.compact{gap:6px}.category-list.compact .category-row{padding:3px 0}.category-list.compact .category-head{font-size:12.5px}
+    .cat-tile{display:flex;flex-direction:column;gap:1px;align-items:flex-start;justify-content:center;padding:6px 8px;min-height:0;border:1px solid var(--line);border-radius:12px;background:#fffdfb;text-align:left;cursor:pointer}
+    .cat-tile-label{font-size:10px;color:var(--sub);font-weight:850;line-height:1.25;white-space:nowrap}
+    .cat-tile-val{font-size:14px;color:var(--ink);font-weight:900;line-height:1.15}
   </style>
 </head>
 <body>
@@ -1416,11 +1419,6 @@
           <button class="primary" type="button" onclick="adminPasswordLogin()" style="margin-top:10px">ログイン</button>
           <button type="button" onclick="sendAdminPasswordSetup()" style="margin-top:8px;background:none;border:none;color:var(--ruu);font-size:12px;font-weight:800;text-decoration:underline;cursor:pointer;padding:4px">初回の方・パスワードを忘れた方はこちら</button>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
-          <button class="primary" onclick="openNewEventSheet()" style="width:100%;margin:0"><svg class="icon"><use href="#i-calendar"/></svg>イベント作成</button>
-          <button class="primary" onclick="openAllAppsPanel()" style="width:100%;margin:0"><svg class="icon"><use href="#i-user"/></svg>申込を見る</button>
-        </div>
-
         <div class="event-data-card">
           <h2><svg class="icon"><use href="#i-user"/></svg>バザール別データ一覧</h2>
           <div class="admin-kind-block flat">
@@ -1453,13 +1451,17 @@
 
           <div>
             <div class="section-head" style="margin:0 0 8px"><h2 class="section-title">出店カテゴリー</h2><span class="section-link">残り 2枠</span></div>
-            <div class="category-list compact">
-              <button class="category-row" onclick="openAppsPanel('all')"><div class="category-head"><span>申し込み数</span><span>36件</span></div></button>
-              <button class="category-row" onclick="openAppsPanel('food')"><div class="category-head"><span>飲食</span><span>6 / 7</span></div></button>
-              <button class="category-row" onclick="openAppsPanel('retail')"><div class="category-head"><span>物販</span><span>8 / 8</span></div></button>
-              <button class="category-row" onclick="openAppsPanel('session')"><div class="category-head"><span>セッション</span><span>5 / 7</span></div></button>
-              <button class="category-row" onclick="openAppsPanel('treatment')"><div class="category-head"><span>施術</span><span>6 / 8</span></div></button>
-              <button class="category-row" onclick="openAppsPanel('party-yes')"><div class="category-head"><span>交流会参加者</span><span>18名</span></div></button>
+            <div class="cat-host">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <button class="cat-tile" data-cat="all" onclick="openAppsPanel('all')"><span class="cat-tile-label">申込数</span><span class="cat-tile-val">0件</span></button>
+                <button class="cat-tile" data-cat="party" onclick="openAppsPanel('party-yes')"><span class="cat-tile-label">交流会参加者</span><span class="cat-tile-val">0名</span></button>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px">
+                <button class="cat-tile" data-cat="food" onclick="openAppsPanel('food')"><span class="cat-tile-label">飲食</span><span class="cat-tile-val">0/0</span></button>
+                <button class="cat-tile" data-cat="retail" onclick="openAppsPanel('retail')"><span class="cat-tile-label">物販</span><span class="cat-tile-val">0/0</span></button>
+                <button class="cat-tile" data-cat="session" onclick="openAppsPanel('session')"><span class="cat-tile-label">セッション</span><span class="cat-tile-val">0/0</span></button>
+                <button class="cat-tile" data-cat="treatment" onclick="openAppsPanel('treatment')"><span class="cat-tile-label">施術</span><span class="cat-tile-val">0/0</span></button>
+              </div>
             </div>
           </div>
 
@@ -1555,7 +1557,9 @@
             </div>
           </details>
 
-          <button onclick="logoutAdmin()" style="width:100%;margin-top:12px;background:#fff8f8;border:1px solid #f0c8c8;border-radius:16px;color:#c84a4a;font-size:12px;font-weight:850;min-height:42px;cursor:pointer">🔒 ログアウト</button>
+          <button class="primary" onclick="openNewEventSheet()" style="width:100%;margin-top:14px"><svg class="icon"><use href="#i-calendar"/></svg>イベントを作成する</button>
+
+          <button onclick="logoutAdmin()" style="width:100%;margin-top:10px;background:#fff8f8;border:1px solid #f0c8c8;border-radius:16px;color:#c84a4a;font-size:12px;font-weight:850;min-height:42px;cursor:pointer">🔒 ログアウト</button>
         </div>
 
         <div id="admin-panel-backdrop" class="admin-panel-backdrop" onclick="closeAdminPanel(event)"></div>
@@ -2252,6 +2256,8 @@
         renderEventList();
         renderAdminEventOnlyList();
         renderMypageEventCards();
+        // Supabaseイベント読込後に主催者ダッシュボードのバザールセレクタを再構築
+        if(typeof refreshAdminDashboardEventSelector==='function') refreshAdminDashboardEventSelector();
         return true;
       }catch(e){
         showToast('Supabaseのイベント読み込みに失敗しました。試作用データを表示します。', 'warn');
@@ -7497,13 +7503,11 @@ mikke.ruu2025@gmail.com`,
           btns[2].querySelector('strong').textContent = '0件';
           btns[3].querySelector('strong').textContent = '0件';
         }
-        var rows=document.querySelectorAll('.category-list .category-row');
-        if(rows.length>=6){
-          ['0件','0 / 0','0 / 0','0 / 0','0 / 0','0名'].forEach(function(label, i){
-            var spans = rows[i].querySelectorAll('.category-head span');
-            if(spans[1]) spans[1].textContent = label;
-          });
-        }
+        var catReset = {all:'0件', party:'0名', food:'0/0', retail:'0/0', session:'0/0', treatment:'0/0'};
+        Object.keys(catReset).forEach(function(cat){
+          var el = document.querySelector('.cat-host [data-cat="'+cat+'"] .cat-tile-val');
+          if(el) el.textContent = catReset[cat];
+        });
         var feeEl = document.getElementById('dash-rev-fee');
         var partyEl = document.getElementById('dash-rev-party');
         if(feeEl) feeEl.textContent = '¥0';
@@ -7619,20 +7623,17 @@ mikke.ruu2025@gmail.com`,
           btns[2].querySelector('strong').textContent = lineNotInvited+'件';
           btns[3].querySelector('strong').textContent = eyeNotSubmitted+'件';
         }
-        var rows=document.querySelectorAll('.category-list .category-row');
-        if(rows.length>=6){
-          var setRow = function(i, label, count, cap, suffix){
-            rows[i].querySelectorAll('.category-head span')[1].textContent = cap ? (count+' / '+cap) : (count+(suffix||''));
-          };
-          // 申し込み数: 「N件」表示
-          rows[0].querySelectorAll('.category-head span')[1].textContent = total+'件';
-          // カテゴリー: 確定済みのみ
-          setRow(1, '飲食', confirmedByCat('food'), capF);
-          setRow(2, '物販', confirmedByCat('retail'), capR);
-          setRow(3, 'セッション', confirmedByCat('session'), capS);
-          setRow(4, '施術', confirmedByCat('treatment'), capT);
-          setRow(5, '交流会参加者', partyYes, 0, '名');
-        }
+        // カテゴリータイル更新（data-cat）
+        var setCat = function(cat, text){
+          var el = document.querySelector('.cat-host [data-cat="'+cat+'"] .cat-tile-val');
+          if(el) el.textContent = text;
+        };
+        setCat('all', total+'件');
+        setCat('party', partyYes+'名');
+        setCat('food', confirmedByCat('food')+'/'+capF);
+        setCat('retail', confirmedByCat('retail')+'/'+capR);
+        setCat('session', confirmedByCat('session')+'/'+capS);
+        setCat('treatment', confirmedByCat('treatment')+'/'+capT);
         // 売上計算（出店料＋交流会）
         updateDashboardRevenue(ev);
         // 日程タイムライン
