@@ -2566,11 +2566,33 @@
         var current = await sb.auth.getSession();
         var session = current && current.data && current.data.session;
         if(!session || !session.user || !CURRENT_USER_EMAIL) return false;
+        // 未紐付け申込（user_id=null）をログイン済みユーザーに紐付け
+        if(CURRENT_USER_ID && CURRENT_USER_EMAIL){
+          try{
+            await sb.from('applications')
+              .update({user_id: CURRENT_USER_ID})
+              .eq('email', CURRENT_USER_EMAIL)
+              .is('user_id', null);
+          }catch(e){}
+        }
+        var selectCols = 'id,event_id,user_id,email,person_name,kana,shop_name,category,content,appeal,instagram,uword_id,attendee_count,status,eyecatch_image_url,admin_memo,answers,created_at';
         var res = await sb.from('applications')
-          .select('id,event_id,user_id,email,person_name,kana,shop_name,category,content,appeal,instagram,uword_id,attendee_count,status,eyecatch_image_url,admin_memo,answers,created_at')
+          .select(selectCols)
           .order('created_at', {ascending:false});
         if(res.error) throw res.error;
         var remoteApps = (res.data||[]).map(mapSupabaseApplicationRow);
+        // RLS が user_id ベースの場合、メールアドレスでも取得して補完
+        if(CURRENT_USER_EMAIL){
+          var res2 = await sb.from('applications')
+            .select(selectCols)
+            .eq('email', CURRENT_USER_EMAIL)
+            .order('created_at', {ascending:false});
+          if(!res2.error){
+            (res2.data||[]).map(mapSupabaseApplicationRow).forEach(function(app){
+              if(!remoteApps.find(function(a){return a.id===app.id;})) remoteApps.push(app);
+            });
+          }
+        }
         remoteApps.forEach(function(app){ upsertById(APPLICATIONS, app); });
         refreshCurrentUserEventsByEmail(CURRENT_USER_EMAIL);
         syncMypageProfileFromLatestApplication();
@@ -6002,7 +6024,7 @@
       });
       var sortedEvents = Object.keys(nextUserEvents)
         .map(function(evId){return (EVENTS||[]).find(function(e){return e.id===evId;});})
-        .filter(function(ev){return !!ev;})
+        .filter(function(ev){return !!ev && ev.status !== 'draft';})
         .sort(function(a,b){
           var ap = getEventEffectiveStatus(a)==='past';
           var bp = getEventEffectiveStatus(b)==='past';
