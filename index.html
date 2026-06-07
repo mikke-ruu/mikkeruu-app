@@ -3241,10 +3241,31 @@
       CURRENT_USER_ID = '';
       CURRENT_USER_EMAIL = '';
       CURRENT_USER_ROLE = 'general';
-      APPLICATIONS = (APPLICATIONS||[]).filter(function(a){ return a.source !== 'supabase'; });
+      APPLICATIONS = [];
+      NOTICES = (NOTICES||[]).filter(function(n){ return n.channel !== 'individual'; });
+      ['mypage-name','mypage-cat','mypage-content'].forEach(function(id){
+        var el = document.getElementById(id); if(el) el.textContent = '未入力';
+      });
+      if(typeof setMypageEyecatchPending==='function') setMypageEyecatchPending();
+      syncMypageProfileFromLatestApplication();
       if(typeof renderAdminLoginState==='function') renderAdminLoginState();
       showToast('ログアウトしました');
       showPage('home', true);
+    }
+    async function sendMypageMagicLink(){
+      var emailInput = document.getElementById('mypage-login-email');
+      var email = emailInput ? emailInput.value.trim() : '';
+      if(!email){ showToast('メールアドレスを入力してください','warn'); return; }
+      var sb = getSupabaseClient();
+      if(!sb){ showToast('ログインを利用できません','warn'); return; }
+      try{
+        var redirectTo = (location.origin||'')+location.pathname+'#mypage';
+        var res = await sb.auth.signInWithOtp({ email:email, options:{ emailRedirectTo:redirectTo, shouldCreateUser:false } });
+        if(res.error) throw res.error;
+        showToast('ログインリンクをメールで送りました。メールをご確認ください。');
+      }catch(e){
+        showToast('送信できませんでした：'+((e&&e.message)||String(e)),'warn');
+      }
     }
     async function changeAdminPassword(){
       var sb = getSupabaseClient();
@@ -4148,9 +4169,20 @@
         body.textContent = 'イベント参加のみの場合、来場者向けの出店プロフィールやアイキャッチ提出欄は表示しません。申込状況と運営からのお知らせは下に表示されます。';
         actions.innerHTML = "<button class=\"primary\" onclick=\"showPage('events')\">イベントを見る</button><button class=\"secondary\" onclick=\"scrollToMypageNotices()\">お知らせを見る</button>";
       }else{
-        title.textContent = 'まだ申込はありません';
-        body.textContent = 'イベントやバザールに申込すると、このページに申込状況・確定連絡・運営からのお知らせが表示されます。';
-        actions.innerHTML = "<button class=\"primary\" onclick=\"showPage('events')\">募集中を見る</button><button class=\"secondary\" onclick=\"showPage('home')\">ホームへ</button>";
+        var isLoggedIn = !!(CURRENT_USER_EMAIL || CURRENT_USER_ID);
+        if(!isLoggedIn){
+          title.textContent = 'ログインして申込状況を確認';
+          body.textContent = '申込時に使ったメールアドレスを入力すると、ログインリンクをお送りします。';
+          actions.innerHTML = '<div style="display:flex;flex-direction:column;gap:8px;width:100%">'
+            +'<input class="input" id="mypage-login-email" type="email" placeholder="メールアドレス" style="width:100%;box-sizing:border-box">'
+            +'<button class="primary" onclick="sendMypageMagicLink()">ログインリンクを送る</button>'
+            +'<button class="secondary" style="font-size:11px" onclick="showPage(\'events\')">申込はこちら</button>'
+            +'</div>';
+        }else{
+          title.textContent = 'まだ申込はありません';
+          body.textContent = 'イベントやバザールに申込すると、このページに申込状況・確定連絡・運営からのお知らせが表示されます。';
+          actions.innerHTML = "<button class=\"primary\" onclick=\"showPage('events')\">募集中を見る</button><button class=\"secondary\" onclick=\"showPage('home')\">ホームへ</button>";
+        }
       }
     }
     function setMypageUwordVisibility(visible){
