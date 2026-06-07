@@ -915,7 +915,7 @@
 
       <section id="news" class="page">
         <h1 class="page-title">お知らせ</h1>
-        <p class="helper" style="margin-top:-8px">主催者からの全体向けお知らせです。出店者向けや個人宛てのお知らせは <a href="#mypage" onclick="showPage('mypage')" style="color:var(--ruu);font-weight:900">マイページ</a> から確認できます。</p>
+        <p class="helper" style="margin-top:-8px">主催者からの全体向けお知らせです。出店者・参加者向けや個人宛てのお知らせは <a href="#mypage" onclick="showPage('mypage')" style="color:var(--ruu);font-weight:900">マイページ</a> から確認できます。</p>
         <div class="list" id="news-list">
           <!-- 動的に描画 -->
           <p class="helper" style="text-align:center;padding:40px 0">読み込み中…</p>
@@ -4968,32 +4968,42 @@
       var body = (ev && ev.name ? ev.name + '\n' : '') +
         (isEv ? 'イベントへの参加が確定しました。' : 'バザールへの出店が確定しました。') +
         '\n当日の詳細や連絡事項は、このマイページのお知らせで順次ご案内します。';
-      if(ev && ev.lineUrl && !isEv){
-        body += '\n\nグループLINE: ' + ev.lineUrl;
-      }
+      return {title:title, body:body};
+    }
+    function buildLineNoticeText(app, ev){
+      var title = 'グループLINEにご参加ください';
+      var body = (ev && ev.name ? ev.name + '\n' : '') +
+        '出店者向けグループLINEでは、当日のスケジュール・設営・搬入情報をお知らせします。\n\n参加URL: ' +
+        (ev && ev.lineUrl ? ev.lineUrl : '');
+      return {title:title, body:body};
+    }
+    function buildEyecatchNoticeText(app, ev){
+      var title = 'アイキャッチ画像を提出してください';
+      var body = (ev && ev.name ? ev.name + '\n' : '') +
+        'アイキャッチ画像は来場者向けのチラシやSNS素材に使用します。マイページのイベント詳細から提出できます。' +
+        (ev && ev.eyecatchDeadline ? '\n\n締切: ' + ev.eyecatchDeadline : '');
       return {title:title, body:body};
     }
     function upsertLocalConfirmationNotice(app, ev){
       if(!app || !ev) return null;
       var appKey = app.supabaseId || app.id || ((app.event||'') + '-' + (app.email||''));
-      var noticeId = SUPABASE_CONFIRM_NOTICE_PREFIX + appKey;
-      var text = buildConfirmationNoticeText(app, ev);
-      var existing = (NOTICES||[]).find(function(n){return n.id===noticeId;});
-      var notice = {
-        id: noticeId,
-        source: 'local-confirmation',
-        channel: 'individual',
-        targetEvent: ev.id,
-        targetPerson: app.user_id || app.person || '',
-        targetUserId: app.user_id || app.person || '',
-        targetEmail: app.email || '',
-        title: text.title,
-        body: text.body,
-        image: '',
-        date: todayStr(),
-        read: existing ? !!existing.read : false
+      var isEv = isParticipantOnlyEvent(ev) || (app.category==='event');
+      var mkNotice = function(id, text){
+        var existing = (NOTICES||[]).find(function(n){return n.id===id;});
+        return {id:id, source:'local-confirmation', channel:'individual',
+          targetEvent:ev.id, targetPerson:app.user_id||app.person||'',
+          targetUserId:app.user_id||app.person||'', targetEmail:app.email||'',
+          title:text.title, body:text.body, image:'', date:todayStr(),
+          read:existing ? !!existing.read : false};
       };
+      var notice = mkNotice(SUPABASE_CONFIRM_NOTICE_PREFIX + appKey, buildConfirmationNoticeText(app, ev));
       upsertById(NOTICES, notice);
+      if(!isEv && ev.lineUrl){
+        upsertById(NOTICES, mkNotice(SUPABASE_CONFIRM_NOTICE_PREFIX + 'line-' + appKey, buildLineNoticeText(app, ev)));
+      }
+      if(!isEv){
+        upsertById(NOTICES, mkNotice(SUPABASE_CONFIRM_NOTICE_PREFIX + 'eye-' + appKey, buildEyecatchNoticeText(app, ev)));
+      }
       markStateDirty();
       saveAppState();
       renderMypageNotices();
@@ -5004,46 +5014,77 @@
       var sb = getSupabaseClient();
       if(!sb || !app || !ev || !applicationId) return false;
       var text = buildConfirmationNoticeText(app, ev);
+      var isEv = isParticipantOnlyEvent(ev) || (app.category==='event');
       var insertedSomething = false;
+      var edgeFnOk = false;
       try{
         var fnRes = await sb.functions.invoke('admin-confirm-application', {
           body: {application_id: applicationId}
         });
         if(fnRes && !fnRes.error && fnRes.data && fnRes.data.ok){
           showToast(fnRes.data.mail_status==='sent' ? '確定メールを送信しました' : '確定通知を作成しました。メールは送信キューを確認してください。', 'success');
-          return true;
-        }
-      }catch(e){}
-      try{
-        if(app.user_id || app.person || app.email){
-          var targetUserId = (app.user_id || app.person || '');
-          if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUserId)) targetUserId = null;
-          var noticeRes = await sb.from('notices').insert({
-            channel: 'individual',
-            event_id: ev.supabaseId || ev.id,
-            target_user_id: targetUserId,
-            target_email: app.email || null,
-            title: text.title,
-            body: text.body
-          });
-          if(noticeRes.error) throw noticeRes.error;
           insertedSomething = true;
+          edgeFnOk = true;
         }
       }catch(e){}
-      try{
-        if(app.email){
-          var mailRes = await sb.from('mail_logs').insert({
-            event_id: ev.supabaseId || ev.id,
-            application_id: applicationId,
-            recipient_email: app.email,
-            subject: text.title + ' - Mikkeruu',
-            template_key: 'application_confirmed',
-            status: 'queued'
+      // Edge Function が失敗した場合: 確定通知＋メールログをフォールバック INSERT
+      if(!edgeFnOk){
+        try{
+          if(app.user_id || app.person || app.email){
+            var targetUid = (app.user_id || app.person || '');
+            if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUid)) targetUid = null;
+            var noticeRes = await sb.from('notices').insert({
+              channel: 'individual',
+              event_id: ev.supabaseId || ev.id,
+              target_user_id: targetUid,
+              target_email: app.email || null,
+              title: text.title,
+              body: text.body
+            });
+            if(noticeRes.error) throw noticeRes.error;
+            insertedSomething = true;
+          }
+        }catch(e){}
+        try{
+          if(app.email){
+            var mailRes = await sb.from('mail_logs').insert({
+              event_id: ev.supabaseId || ev.id,
+              application_id: applicationId,
+              recipient_email: app.email,
+              subject: text.title + ' - Mikkeruu',
+              template_key: 'application_confirmed',
+              status: 'queued'
+            });
+            if(mailRes.error) throw mailRes.error;
+            insertedSomething = true;
+          }
+        }catch(e){}
+      }
+      // バザールのみ: LINE・アイキャッチ通知を追加 INSERT（Edge Function の成否に関わらず）
+      if(!isEv){
+        var targetUid2 = (app.user_id || app.person || '');
+        if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUid2)) targetUid2 = null;
+        if(ev.lineUrl){
+          try{
+            var lineText = buildLineNoticeText(app, ev);
+            await sb.from('notices').insert({
+              channel:'individual', event_id:ev.supabaseId||ev.id,
+              target_user_id:targetUid2, target_email:app.email||null,
+              title:lineText.title, body:lineText.body
+            });
+            insertedSomething = true;
+          }catch(e){}
+        }
+        try{
+          var eyeText = buildEyecatchNoticeText(app, ev);
+          await sb.from('notices').insert({
+            channel:'individual', event_id:ev.supabaseId||ev.id,
+            target_user_id:targetUid2, target_email:app.email||null,
+            title:eyeText.title, body:eyeText.body
           });
-          if(mailRes.error) throw mailRes.error;
           insertedSomething = true;
-        }
-      }catch(e){}
+        }catch(e){}
+      }
       return insertedSomething;
     }
     async function setAppStatus(cardId,status,btn){
@@ -6031,7 +6072,7 @@
     function renderMypageEventCards(){
       renderMypageAccessState();
       var nextUserEvents = {};
-      var stateLabel = function(s, ev){var isEv=isParticipantOnlyEvent(ev);return s==='confirmed'?(isEv?'確定':'出店確定'):s==='applied'?(isEv?'申込中':'申込中'):'終了';};
+      var stateLabel = function(s, ev){var isEv=isParticipantOnlyEvent(ev);return s==='confirmed'?(isEv?'参加確定':'出店確定'):s==='applied'?(isEv?'申込中':'申込中'):'終了';};
       var stateClass = function(s){return s==='ended'?'mint':(s==='applied'?'orange':'');};
       var normalizeState = function(s){
         if(s==='confirmed' || s==='applied' || s==='ended') return s;
@@ -7848,7 +7889,7 @@ mikke.ruu2025@gmail.com`,
         // お知らせを送る（メインアクション）
         var noticeBtn = document.createElement('button');
         noticeBtn.type = 'button';
-        noticeBtn.innerHTML = '<svg class="icon" style="width:14px;height:14px;vertical-align:-2px;margin-right:6px"><use href="#i-bell"/></svg>この出店者にお知らせを送る';
+        noticeBtn.innerHTML = '<svg class="icon" style="width:14px;height:14px;vertical-align:-2px;margin-right:6px"><use href="#i-bell"/></svg>この'+(card.dataset.kind==='event'?'参加者':'出店者')+'にお知らせを送る';
         noticeBtn.style.cssText = 'min-height:42px;border-radius:14px;border:none;background:var(--ruu);color:#fff;font-size:13px;font-weight:900;cursor:pointer';
         noticeBtn.addEventListener('click', function(e){e.stopPropagation();openSendNoticeFromCard(card.id)});
         box.appendChild(noticeBtn);
