@@ -1051,7 +1051,7 @@
         <div class="support-card" style="margin-top:24px">
           <h2>解決しない場合はお問い合わせください</h2>
           <p>FAQで見つからなかった疑問は、運営に直接ご相談いただけます。</p>
-          <div class="actions">
+          <div class="actions" style="grid-template-columns:1fr">
             <a class="primary" id="faq-contact-btn" href="javascript:void(0)" onclick="openConsultLink()">運営に問い合わせる</a>
           </div>
         </div>
@@ -1639,7 +1639,7 @@
             </select>
           </div>
           <input id="eyecatch-search" class="input" type="search" placeholder="名前・屋号で検索" oninput="filterEyecatch()" style="min-height:44px">
-          <button class="eyecatch-bulk-btn" id="eyecatch-bulk-btn" onclick="showToast('一括DL開始（プロトタイプ）')">
+          <button class="eyecatch-bulk-btn" id="eyecatch-bulk-btn" onclick="downloadEyecatchBulk()">
             <svg class="icon"><use href="#i-download"/></svg>このバザールの全画像をまとめてDL（0枚）
           </button>
           <div class="admin-eyecatch-grid" id="eyecatch-grid"></div>
@@ -5283,7 +5283,7 @@
           '<div class="eyecatch-item" data-name="'+h(title)+'">'+
             '<div class="eyecatch-item-img">'+
               '<img src="'+src+'" alt="'+h(title)+'">'+
-              '<button class="eyecatch-dl-btn" onclick="showToast(\'DL開始（プロトタイプ）\')"><svg class="icon" style="width:14px;height:14px"><use href="#i-download"/></svg></button>'+
+              '<button class="eyecatch-dl-btn" onclick="downloadSingleEyecatch(\''+src+'\',\''+h(title)+'\')" title="ダウンロード"><svg class="icon" style="width:14px;height:14px"><use href="#i-download"/></svg></button>'+
             '</div>'+
             '<p class="eyecatch-item-name">'+h(title)+'</p>'+
           '</div>';
@@ -5306,6 +5306,54 @@
     function updateEyecatchBulkBtn(n){
       var btn=document.getElementById('eyecatch-bulk-btn');
       if(btn) btn.innerHTML='<svg class="icon"><use href="#i-download"/></svg>このバザールの全画像をまとめてDL（'+n+'枚）';
+    }
+    async function _fetchBlob(src){
+      if(src.startsWith('data:')){
+        var arr=src.split(','), mime=arr[0].match(/:(.*?);/)[1], bstr=atob(arr[1]), n=bstr.length, u8=new Uint8Array(n);
+        while(n--){ u8[n]=bstr.charCodeAt(n); }
+        return new Blob([u8],{type:mime});
+      }
+      var res=await fetch(src);
+      if(!res.ok) throw new Error('fetch '+res.status);
+      return res.blob();
+    }
+    async function downloadSingleEyecatch(src, title){
+      if(!src){ showToast('画像URLがありません'); return; }
+      try{
+        var blob=await _fetchBlob(src);
+        var url=URL.createObjectURL(blob);
+        var a=document.createElement('a');
+        a.href=url;
+        a.download=(title||'eyecatch').replace(/[/\\:*?"<>|]/g,'_')+'.jpg';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function(){ URL.revokeObjectURL(url); },5000);
+      }catch(e){ showToast('DLできませんでした: '+src.slice(0,40)); }
+    }
+    async function downloadEyecatchBulk(){
+      var imgs=Array.from(document.querySelectorAll('#eyecatch-grid .eyecatch-item-img img'));
+      if(!imgs.length){ showToast('ダウンロード対象がありません'); return; }
+      var btn=document.getElementById('eyecatch-bulk-btn');
+      if(btn){ btn.disabled=true; btn.style.opacity='.6'; }
+      showToast('DL準備中…（'+imgs.length+'枚）');
+      var ok=0, fail=0;
+      for(var i=0;i<imgs.length;i++){
+        var img=imgs[i];
+        var item=img.closest('.eyecatch-item');
+        var nameEl=item ? item.querySelector('.eyecatch-item-name') : null;
+        var title=(nameEl ? nameEl.textContent : 'eyecatch-'+i).replace(/[/\\:*?"<>|]/g,'_');
+        try{
+          var blob=await _fetchBlob(img.src);
+          var url=URL.createObjectURL(blob);
+          var a=document.createElement('a');
+          a.href=url; a.download=title+'.jpg';
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          setTimeout(function(u){ URL.revokeObjectURL(u); },5000,url);
+          ok++;
+          await new Promise(function(r){setTimeout(r,300);});
+        }catch(e){ fail++; }
+      }
+      if(btn){ btn.disabled=false; btn.style.opacity=''; }
+      showToast(ok+'枚ダウンロードしました'+(fail?'（'+fail+'枚失敗）':''), fail?'':'success');
     }
     function filterEyecatch(){
       var visible = renderEyecatchGrid();
@@ -11565,19 +11613,25 @@ mikke.ruu2025@gmail.com`,
       var sorted = (EVENTS||[]).filter(function(e){return !!(String(e.name||'').trim() || normalizeDateInput(e.date));}).slice().sort(function(a,b){return compareEventDateAsc(b,a);});
       var bazaarOnly = sorted.filter(function(e){return e.kind !== 'イベント';});
 
-      // 申込一覧フィルタ：全イベント（種別フィルタで分離済み）
+      // 申込一覧フィルタ：現在の種別モードに合わせて絞り込む
       var appsSel = document.getElementById('apps-event-filter');
       if(appsSel){
         var appsCurrent = appsSel.value || 'all';
-        var html = '<option value="all">すべてのイベント（過去含む）</option>';
-        html += sorted.map(function(e){
+        var kindMode = (typeof __appsKindMode !== 'undefined') ? __appsKindMode : 'all';
+        var appsFiltered = kindMode==='event' ? sorted.filter(function(e){return e.kind==='イベント';}) :
+                           kindMode==='bazaar' ? sorted.filter(function(e){return e.kind!=='イベント';}) :
+                           sorted;
+        var allLabel = kindMode==='event' ? 'すべてのイベント（過去含む）' :
+                       kindMode==='bazaar' ? 'すべてのバザール（過去含む）' :
+                       'すべて（過去含む）';
+        var appsHtml = '<option value="all">'+allLabel+'</option>';
+        appsHtml += appsFiltered.map(function(e){
           var iso = normalizeDateInput(e.date);
           var dt = iso ? formatEvDateShort({date:iso, dayOfWeek:(e.dayOfWeek||computeDayOfWeek(iso)||'')}) : '日付未設定';
           var stat = getEventEffectiveStatus(e)==='past' ? '（終了）' : '';
-          var kindTag = e.kind==='イベント' ? ' [参加]' : '';
-          return '<option value="'+e.id+'">'+dt+' '+(e.name||'イベント名未設定')+kindTag+stat+'</option>';
+          return '<option value="'+e.id+'">'+dt+' '+(e.name||'イベント名未設定')+stat+'</option>';
         }).join('');
-        appsSel.innerHTML = html;
+        appsSel.innerHTML = appsHtml;
         if(Array.from(appsSel.options).some(function(o){return o.value===appsCurrent;})) appsSel.value = appsCurrent;
         else appsSel.value = 'all';
       }
