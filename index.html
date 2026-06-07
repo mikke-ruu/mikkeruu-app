@@ -10045,6 +10045,8 @@ mikke.ruu2025@gmail.com`,
       if(!src) return;
       var copy = JSON.parse(JSON.stringify(src));
       copy.id = 'ev-'+Date.now().toString(36);
+      copy.supabaseId = null;   // 元イベントのIDをリセット（上書き防止）
+      copy.source = 'local';
       copy.name = src.name + '（コピー）';
       copy.status = 'draft';
       copy.date = ''; // 日付は空に
