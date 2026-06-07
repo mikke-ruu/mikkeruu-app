@@ -2859,6 +2859,15 @@
       var nameLabel = isEvent ? '参加者名 <span style="color:var(--ruu)">必須</span>' : '担当者名（省略可）';
       var btnLabel = isEvent ? '参加確定で登録する' : '出店確定で登録する';
       var sheetTitle = isEvent ? '参加者を手動登録' : '出店者を手動登録';
+      var contentBlock = isEvent ? '' :
+        '<label style="font-size:11px;font-weight:900;color:var(--sub)">出店内容（任意）'
+        +'<input class="input" id="mr-content" placeholder="例：ハンドメイドアクセサリー、キャンドルなど" style="margin-top:4px"></label>';
+      var uwidBlock = isEvent ? '' :
+        '<label style="font-size:11px;font-weight:900;color:var(--sub)">ユーワードID（任意）'
+        +'<input class="input" id="mr-uwid" placeholder="例：12345678" style="margin-top:4px"></label>';
+      var achieverBlock = isEvent ? '' :
+        '<label style="font-size:11px;font-weight:900;color:var(--sub)">アチーバー名（任意）'
+        +'<input class="input" id="mr-achiever" placeholder="例：田中 花子" style="margin-top:4px"></label>';
       var body = '<div style="display:flex;flex-direction:column;gap:14px">'
         +eventBlock
         +shopBlock
@@ -2866,6 +2875,9 @@
         +'<input class="input" id="mr-name" placeholder="例：田中 花子" style="margin-top:4px"></label>'
         +categoryBlock
         +feeBlock
+        +contentBlock
+        +uwidBlock
+        +achieverBlock
         +'<label style="font-size:11px;font-weight:900;color:var(--sub)">メールアドレス（省略可）'
         +'<input class="input" id="mr-email" type="email" placeholder="例：hanako@example.com（入れるとログイン・確定メール可）" style="margin-top:4px"></label>'
         +'<label style="font-size:11px;font-weight:900;color:var(--sub)">メモ（任意）'
@@ -2896,15 +2908,16 @@
       var name = ((document.getElementById('mr-name')||{}).value||'').trim();
       var category = isEvent ? 'event' : ((document.getElementById('mr-category')||{}).value||'retail');
       var fee = isEvent ? '' : ((document.getElementById('mr-fee')||{}).value||'').trim();
+      var contentVal = isEvent ? '' : ((document.getElementById('mr-content')||{}).value||'').trim();
+      var uwidVal = isEvent ? '' : ((document.getElementById('mr-uwid')||{}).value||'').trim();
+      var achieverVal = isEvent ? '' : ((document.getElementById('mr-achiever')||{}).value||'').trim();
       var email = ((document.getElementById('mr-email')||{}).value||'').trim();
       var memo = ((document.getElementById('mr-memo')||{}).value||'').trim();
       if(isEvent && !name){showToast('参加者名を入力してください','warn');return;}
       if(!isEvent && !shop){showToast('屋号を入力してください','warn');return;}
       var placeholderEmail = email || ('manual_'+Date.now()+'@mikkeruu.local');
       var id = 'manual-'+Date.now();
-      var content = '';
-      if(!isEvent && fee) content = '出店料区分：'+fee;
-      if(memo) content = content ? content+' / メモ：'+memo : 'メモ：'+memo;
+      var content = contentVal || '';
       var appData = {
         id:id, supabaseId:'', person:'', user_id:'',
         event:localEventId,
@@ -2916,7 +2929,7 @@
         shopname: isEvent ? (name||'') : (shop || name || ''),
         feeplan: isEvent ? 'event-fee' : '',
         email: placeholderEmail,
-        kana:'', member:'', uwid:'', achiever:'', social:'',
+        kana:'', member:'', uwid:uwidVal||'', achiever:achieverVal||'', social:'',
         content: content,
         attendeeCount: 1,
         comment:'', adminRequest: memo||'',
@@ -2937,6 +2950,8 @@
           shop_name: shop,
           category: category,
           content: content||null,
+          uword_id: uwidVal||null,
+          admin_memo: (achieverVal ? 'アチーバー名：'+achieverVal : null)||(memo||null),
           status: 'confirmed',
         });
         if(res.error){
