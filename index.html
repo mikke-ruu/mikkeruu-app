@@ -5857,68 +5857,57 @@
           '<div class="event-photo"></div>'+
           '<span class="badge mint">お知らせ</span>'+
           '<h1 class="event-title">公開中のイベントはありません</h1>'+
-          '<p class="helper">管理画面で公開すると、ここに表示されます。</p>'+
           (anyPublic ? '<div class="actions application-actions"><button class="secondary" onclick="viewEventDetail(\''+anyPublic.id+'\')">直近イベントを見る</button></div>' : '');
         return;
       }
+      // イベントあり: カード全体を再構築（部分更新だと古いヘルパーテキストが残るため）
+      var isEventOnly = isParticipantOnlyEvent(ev);
+      var hasParty = !isEventOnly && ev.party && ev.party.enabled;
+      var st = getEventEffectiveStatus(ev);
+      var dt = formatEvDateShort(ev)+' '+(ev.startTime||'')+'〜'+(ev.endTime||'');
+      var titleHtml = (ev.name||'-').replace(/(vol\.\d+)\s/, '$1<br>');
+      var coverBg = ev.coverImage ? 'url('+ev.coverImage+')' : '';
+      var isFav = isFavoriteEvent(ev.id);
+
+      var badgesHtml =
+        '<span class="badge '+(isEventOnly?'mint':'orange')+'">'+(isEventOnly?'イベント':'バザール')+'</span>'+
+        (st!=='past' && !isEventOnly ? '<span class="badge orange">出店募集中</span>' : '')+
+        (hasParty && st!=='past' ? '<span class="badge mint">交流会参加募集中</span>' : '');
+
+      var applyHtml = st==='past'
+        ? '<button class="primary apply-link" onclick="openVisitorSurveyForm(\''+ev.id+'\')">来場者アンケートに回答</button>'
+        : '<a class="primary apply-link" href="#apply" onclick="openApplyForEvent(\''+ev.id+'\');return false;">'+(isEventOnly?'参加申し込み':'出店申し込み')+'</a>';
+
+      card.innerHTML =
+        '<div class="event-photo" style="height:220px;border-radius:22px 22px 0 0;margin:-12px -12px 0;background-image:'+coverBg+';background-size:cover;background-position:center"></div>'+
+        '<button class="fav-button'+(isFav?' active':'')+'" style="top:10px" onclick="toggleFavorite(event,this,\''+ev.id+'\')" aria-label="お気に入り" data-event="'+ev.id+'"><svg class="icon"><use href="#i-heart"/></svg></button>'+
+        '<div style="padding:10px 4px 4px">'+
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'+badgesHtml+'</div>'+
+          '<h1 class="event-title">'+titleHtml+'</h1>'+
+          '<p style="font-size:12px;font-weight:800;color:var(--sub);margin:0 0 4px;display:flex;align-items:center;gap:4px">'+
+            '<svg class="icon" style="width:13px;height:13px"><use href="#i-calendar"/></svg>'+dt+
+          '</p>'+
+          '<p style="font-size:12px;color:var(--ruu);font-weight:900;margin:0 0 12px;cursor:pointer" onclick="viewEventDetail(\''+ev.id+'\')">詳細はこちら →</p>'+
+          '<div class="actions application-actions">'+
+            '<button class="secondary" id="home-detail-btn" onclick="viewEventDetail(\''+ev.id+'\')">イベント詳細を見る</button>'+
+            applyHtml+
+          '</div>'+
+        '</div>'+
+        '<div id="home-inline-detail" class="inline-detail">'+
+          '<div class="home-expanded-actions">'+
+            '<a class="icon-action" href="javascript:void(0)" onclick="openMap(this)" data-address="'+(ev.address||'')+'"><svg class="icon"><use href="#i-map"/></svg>MAP</a>'+
+            '<a class="icon-action" href="#exhibitors" onclick="event.stopPropagation();showPage(\'exhibitors\');renderExhibitorsPage(\''+ev.id+'\')"><svg class="icon"><use href="#i-user"/></svg>出店者</a>'+
+            (hasParty ? '<a class="icon-action" href="#party" onclick="showPage(\'party\')"><svg class="icon"><use href="#i-utensils"/></svg>交流会参加</a>' : '')+
+          '</div>'+
+        '</div>';
+
       card.style.cursor = 'pointer';
+      card.style.overflow = 'hidden';
+      card.style.padding = '12px';
       card.onclick = function(e){
         if(e && e.target && e.target.closest && e.target.closest('a,button,input,select,textarea,label')) return;
         viewEventDetail(ev.id);
       };
-      var titleEl = card.querySelector('.event-title');
-      var badgeEl = card.querySelector('.badge');
-      var metaEl = card.querySelector('.event-meta');
-      var detailBtn = card.querySelector('button.secondary');
-      var applyBtn = card.querySelector('a.apply-link');
-      var photoEl = card.querySelector('.event-photo');
-      var favBtn = card.querySelector('.fav-button');
-      if(photoEl) photoEl.style.backgroundImage = ev.coverImage ? 'url('+ev.coverImage+')' : '';
-      if(favBtn){
-        favBtn.dataset.event = ev.id;
-        favBtn.setAttribute('onclick', "toggleFavorite(event,this,'"+ev.id+"')");
-        favBtn.classList.toggle('active', isFavoriteEvent(ev.id));
-      }
-      if(badgeEl){
-        if(isParticipantOnlyEvent(ev)){
-          badgeEl.className = 'badge mint';
-          badgeEl.textContent = 'イベント';
-        }else{
-          badgeEl.className = 'badge orange';
-          badgeEl.textContent = 'バザール';
-        }
-      }
-      if(titleEl){
-        var html = ev.name.replace('Mikke bazar vol.','Mikke bazar vol.').replace(/(vol\.\d+)\s/, '$1<br>');
-        titleEl.innerHTML = html;
-      }
-      if(metaEl){
-        var dt = formatEvDateShort(ev)+' '+(ev.startTime||'')+'〜'+(ev.endTime||'');
-        metaEl.innerHTML =
-          '<span><svg class="icon"><use href="#i-calendar"/></svg> '+dt+'</span>'+
-          (ev.address?'<span><svg class="icon"><use href="#i-map"/></svg> '+ev.address+'</span>':'')+
-          (ev.venue?'<span><svg class="icon"><use href="#i-map"/></svg> '+ev.venue+'</span>':'');
-      }
-      if(detailBtn){
-        detailBtn.onclick = function(){viewEventDetail(ev.id)};
-      }
-      if(applyBtn){
-        if(getEventEffectiveStatus(ev)==='past'){
-          applyBtn.outerHTML = '<button class="primary apply-link" onclick="openVisitorSurveyForm(\''+ev.id+'\')">来場者アンケートに回答</button>';
-        }else{
-          applyBtn.setAttribute('href', '#apply');
-          applyBtn.setAttribute('onclick', "openApplyForEvent('"+ev.id+"');return false;");
-          applyBtn.textContent = isParticipantOnlyEvent(ev) ? '参加申し込み' : '出店申し込み';
-        }
-      }
-      // 「出店者」「MAP」リンクも対象イベントへ
-      var expandActions = card.querySelector('.home-expanded-actions');
-      if(expandActions){
-        var mapLink = expandActions.querySelector('a[data-address]');
-        if(mapLink) mapLink.dataset.address = ev.address || '';
-        var exLink = expandActions.querySelector('a[href="#exhibitors"]');
-        if(exLink) exLink.onclick = function(e){e.stopPropagation();showPage('exhibitors');renderExhibitorsPage(ev.id)};
-      }
     }
 
     function getCurrentUserApplicationForEvent(evId){
@@ -10187,7 +10176,10 @@ mikke.ruu2025@gmail.com`,
         '<div class="ee-stepper-line">'+
           '<span class="ee-step-dot active" data-ee-step-dot="1">1. 基本情報</span>'+
           '<span class="ee-step-dot" data-ee-step-dot="2">2. 募集/詳細</span>'+
-          '<span class="ee-step-dot" data-ee-step-dot="3">3. 交流会/保存</span>'+
+          '<span class="ee-step-dot" data-ee-step-dot="3">'+(function(){
+          var _ev = __eventEditContext.eventId ? (EVENTS||[]).find(function(x){return x.id===__eventEditContext.eventId;}) : null;
+          return (_ev && _ev.party && _ev.party.enabled) ? '3. 交流会/保存' : '3. 保存';
+        }())+'</span>'+
         '</div>';
 
       var step1 = document.createElement('div');
