@@ -3242,12 +3242,14 @@
       CURRENT_USER_EMAIL = '';
       CURRENT_USER_ROLE = 'general';
       APPLICATIONS = [];
+      CURRENT_USER_EVENTS = {};
       NOTICES = (NOTICES||[]).filter(function(n){ return n.channel !== 'individual'; });
-      ['mypage-name','mypage-cat','mypage-content'].forEach(function(id){
+      ['mypage-name','mypage-cat','mypage-content','mypage-instagram','mypage-uword','mypage-uwordid',
+       'priv-name','priv-kana','priv-member','priv-achiever','priv-mail'].forEach(function(id){
         var el = document.getElementById(id); if(el) el.textContent = '未入力';
       });
       if(typeof setMypageEyecatchPending==='function') setMypageEyecatchPending();
-      syncMypageProfileFromLatestApplication();
+      renderMypageEventCards();
       if(typeof renderAdminLoginState==='function') renderAdminLoginState();
       showToast('ログアウトしました');
       showPage('home', true);
@@ -3331,6 +3333,7 @@
       }
       if(id === 'events'){renderPublicEventsPage()}
       if(id === 'favorites'){renderFavoritesEvents()}
+      if(id === 'mypage'){renderMypageEventCards()}
       syncFavoriteButtons();
       if(id === 'party'){renderPartyPage()}
       cameFromShortcut = !rootNav && id !== 'home';
