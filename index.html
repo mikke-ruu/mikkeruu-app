@@ -101,6 +101,8 @@
     .event-row .row-title{display:grid;grid-template-columns:1fr 20px;gap:6px;align-items:start}
     .event-row .row-title h2{margin-top:0}.event-row .row-chevron{width:18px;height:18px;color:#b9a9b0;transition:.2s}.event-row.open .row-chevron{transform:rotate(90deg);color:var(--ruu)}
     .event-row img{width:104px;height:104px;border-radius:18px;object-fit:cover}
+    .event-row.has-portrait-thumb{grid-template-columns:80px 1fr 36px}
+    .ev-portrait-thumb{width:80px;height:100px;border-radius:14px;object-fit:cover;flex-shrink:0}
     .event-row h2{font-size:16px;line-height:1.35;margin:4px 0 5px;font-weight:900}
     .event-row p{margin:0;color:var(--sub);font-size:13px;line-height:1.6}
     .fav-button{width:34px;height:34px;border:0;border-radius:50%;background:#fff;color:#c9b7bd;display:grid;place-items:center}
@@ -6162,8 +6164,12 @@
         return;
       }
       host.innerHTML = list.map(function(ev){
-        return '<article class="card event-row with-fav" onclick="viewEventDetail(\''+ev.id+'\')">'+
-          '<img src="'+getEventCoverImage(ev)+'" alt="">'+
+        var hasFl = ev.flyerImages && ev.flyerImages[0];
+        var thumbSrc = hasFl ? ev.flyerImages[0] : getEventCoverImage(ev);
+        var thumbClass = hasFl ? 'ev-portrait-thumb' : '';
+        var rowClass = 'card event-row with-fav' + (hasFl ? ' has-portrait-thumb' : '');
+        return '<article class="'+rowClass+'" onclick="viewEventDetail(\''+ev.id+'\')">'+
+          '<img'+(thumbClass?' class="'+thumbClass+'"':'')+' src="'+thumbSrc+'" alt="">'+
           '<div>'+getEventKindBadgeHtml(ev)+getEventBadgeHtml(ev)+'<h2>'+ev.name+'</h2><p>'+formatEvDateShort(ev)+' '+(ev.startTime||'')+'〜'+(ev.endTime||'')+'</p><p>'+(ev.address||'')+'</p><p>'+(ev.venue||'')+'</p><p class="section-link">詳細を見る</p></div>'+
           renderFavoriteButton(ev.id)+
         '</article>';
@@ -6187,8 +6193,12 @@
         return;
       }
       host.innerHTML = list.map(function(ev){
-        return '<article class="card event-row with-fav" onclick="viewEventDetail(\''+ev.id+'\')">'+
-          '<img src="'+getEventCoverImage(ev)+'" alt="">'+
+        var hasFl = ev.flyerImages && ev.flyerImages[0];
+        var thumbSrc = hasFl ? ev.flyerImages[0] : getEventCoverImage(ev);
+        var thumbClass = hasFl ? 'ev-portrait-thumb' : '';
+        var rowClass = 'card event-row with-fav' + (hasFl ? ' has-portrait-thumb' : '');
+        return '<article class="'+rowClass+'" onclick="viewEventDetail(\''+ev.id+'\')">'+
+          '<img'+(thumbClass?' class="'+thumbClass+'"':'')+' src="'+thumbSrc+'" alt="">'+
           '<div>'+getEventKindBadgeHtml(ev)+getEventBadgeHtml(ev)+'<h2>'+ev.name+'</h2><p>'+formatEvDateShort(ev)+' '+(ev.startTime||'')+'〜'+(ev.endTime||'')+'</p><p>'+(ev.venue||'')+'</p></div>'+
           renderFavoriteButton(ev.id)+
         '</article>';
@@ -6226,8 +6236,12 @@
       }
       var buildRows = function(items){
         return items.map(function(ev){
-          return '<article class="card event-row with-fav" onclick="viewEventDetail(\''+ev.id+'\')">'+
-            '<img src="'+getEventCoverImage(ev)+'" alt="">'+
+          var hasFl = ev.flyerImages && ev.flyerImages[0];
+          var thumbSrc = hasFl ? ev.flyerImages[0] : getEventCoverImage(ev);
+          var thumbClass = hasFl ? 'ev-portrait-thumb' : '';
+          var rowClass = 'card event-row with-fav' + (hasFl ? ' has-portrait-thumb' : '');
+          return '<article class="'+rowClass+'" onclick="viewEventDetail(\''+ev.id+'\')">'+
+            '<img'+(thumbClass?' class="'+thumbClass+'"':'')+' src="'+thumbSrc+'" alt="">'+
             '<div>'+getEventKindBadgeHtml(ev)+getEventBadgeHtml(ev)+'<div class="row-title"><h2>'+ev.name+'</h2><svg class="icon row-chevron"><use href="#i-chevron"/></svg></div><p>'+formatEvDateShort(ev)+' '+(ev.startTime||'')+'〜'+(ev.endTime||'')+'</p><p>'+(ev.address||'')+'</p><p>'+(ev.venue||'')+'</p><p class="section-link">詳細を見る</p></div>'+
             renderFavoriteButton(ev.id)+
           '</article>';
