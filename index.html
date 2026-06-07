@@ -2197,6 +2197,32 @@
       if(idx>=0) list[idx] = item;
       else list.unshift(item);
     }
+    // Supabaseイベントをローカルへマージ（上書きではなく統合）。
+    // Supabase側が空/未設定の"細かい項目"はローカルの入力値を保持し、未保存データが消えないようにする。
+    function upsertSupabaseEvent(list, item){
+      if(!Array.isArray(list) || !item || !item.id) return;
+      var idx = list.findIndex(function(x){
+        return x && (x.id===item.id || (x.supabaseId && x.supabaseId===item.supabaseId));
+      });
+      if(idx < 0){ list.unshift(item); return; }
+      var local = list[idx];
+      var isEmpty = function(v){ return v===undefined || v===null || v==='' ; };
+      // Supabaseが空でローカルに値がある項目はローカルを残す（未保存入力の保護）
+      ['content','detail','recruitStart','eyecatchDeadline','zoomDate','zoomTime','zoomId','zoomPass','payment','mapUrl','lineGroupUrl']
+        .forEach(function(f){ if(isEmpty(item[f]) && !isEmpty(local[f])) item[f] = local[f]; });
+      // 交流会(party)：Supabaseが未設定(無効/空)でローカルが有効ならローカルを保持
+      var sbPartyOn = item.party && item.party.enabled;
+      var localPartyOn = local.party && local.party.enabled;
+      if(!sbPartyOn && localPartyOn) item.party = local.party;
+      // 画像系：Supabaseが空ならローカルを残す
+      if((!item.flyerImages || !item.flyerImages.length) && local.flyerImages && local.flyerImages.length) item.flyerImages = local.flyerImages;
+      if(isEmpty(item.coverImage) && !isEmpty(local.coverImage)){ item.coverImage = local.coverImage; item.image = local.coverImage; }
+      // 出店料・定員：Supabaseが空ならローカルを残す
+      if((!item.feeOptions || !item.feeOptions.length) && local.feeOptions && local.feeOptions.length) item.feeOptions = local.feeOptions;
+      var capEmpty = !item.capacities || !Object.keys(item.capacities).length || Object.keys(item.capacities).every(function(k){return !item.capacities[k];});
+      if(capEmpty && local.capacities && Object.keys(local.capacities).length) item.capacities = local.capacities;
+      list[idx] = item;
+    }
     function datePartFromIso(v){
       if(!v) return '';
       return String(v).slice(0,10);
@@ -2263,7 +2289,7 @@
             .order('starts_at', {ascending:true});
         }
         if(res.error) throw res.error;
-        (res.data||[]).forEach(function(row){ upsertById(EVENTS, mapSupabaseEventRow(row)); });
+        (res.data||[]).forEach(function(row){ upsertSupabaseEvent(EVENTS, mapSupabaseEventRow(row)); });
         normalizeEventDefaults();
         syncPublicEventViews();
         renderEventList();
