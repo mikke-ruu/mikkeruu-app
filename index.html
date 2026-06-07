@@ -1308,12 +1308,9 @@
             <button class="secondary" onclick="openProfileEditSheet()">プロフィールを編集</button>
             <button class="primary" onclick="openPublicPreview()">公開プレビュー</button>
           </div>
-          <div style="padding:8px 16px 4px">
-            <button onclick="logoutMypage()" style="width:100%;min-height:40px;border-radius:14px;border:1px solid #f0c8c8;background:#fff8f8;color:#c84a4a;font-size:12px;font-weight:850;cursor:pointer">ログアウト</button>
-          </div>
         </div>
 
-        <div class="section-head"><h2 class="section-title">イベント一覧</h2><span class="section-link">日にちが近い順</span></div>
+        <div id="mypage-event-list-head" class="section-head"><h2 class="section-title">イベント一覧</h2><span class="section-link">日にちが近い順</span></div>
         <div class="tabs" id="mypage-event-tabs">
           <button class="active" onclick="filterMypageEvents(this,'all')">すべて</button>
           <button onclick="filterMypageEvents(this,'applied')">申込中</button>
@@ -1398,7 +1395,7 @@
         </div>
 
         <!-- 個人情報（非公開） -->
-        <div class="mp-card" style="margin-top:14px">
+        <div id="mypage-priv-card" class="mp-card" style="margin-top:14px">
           <div class="mp-card-header private">
             <span class="mp-area-label private"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>個人情報（非公開）</span>
             <span class="mp-area-note">あなただけが見れます</span>
@@ -1417,10 +1414,13 @@
           </div>
         </div>
 
-        <button class="mypage-save-tip" onclick="openInstallGuide()" style="margin-top:14px">
+        <button class="mypage-save-tip" id="mypage-save-tip-btn" onclick="openInstallGuide()" style="margin-top:14px">
           <svg class="icon" style="color:var(--ruu)"><use href="#i-plus-square"/></svg>
           <span><b>マイページをすぐ開けるようにする</b>ホーム画面に追加しておくと、メールを探さずに次回からすぐ確認できます。</span>
         </button>
+        <div id="mypage-logout-row" style="display:none;padding:6px 0 2px">
+          <button onclick="logoutMypage()" style="width:100%;min-height:40px;border-radius:14px;border:1px solid #f0c8c8;background:#fff8f8;color:#c84a4a;font-size:12px;font-weight:850;cursor:pointer">ログアウト</button>
+        </div>
       </section>
 
       <section id="admin" class="page">
@@ -4145,12 +4145,22 @@
       var apps = Array.isArray(userApps) ? userApps : getCurrentUserApplications();
       var mode = getMypageAccessMode(apps);
       var hasBazaarApp = mode==='bazaar';
+      var isLoggedIn = !!(CURRENT_USER_EMAIL || CURRENT_USER_ID);
+      var showFull = mode==='event' || mode==='bazaar';
       var profile = document.getElementById('mp-public-profile');
       if(profile) profile.style.display = hasBazaarApp ? '' : 'none';
       var memberCell = document.getElementById('priv-member-cell');
       var achieverCell = document.getElementById('priv-achiever-cell');
       if(memberCell) memberCell.style.display = hasBazaarApp ? '' : 'none';
       if(achieverCell) achieverCell.style.display = hasBazaarApp ? '' : 'none';
+      // ログイン状態に応じてセクション表示を制御
+      ['mypage-notice-section','mypage-priv-card','mypage-event-list-head','mypage-event-tabs'].forEach(function(elId){
+        var el = document.getElementById(elId); if(el) el.style.display = showFull ? '' : 'none';
+      });
+      var logoutRow = document.getElementById('mypage-logout-row');
+      if(logoutRow) logoutRow.style.display = isLoggedIn ? '' : 'none';
+      var saveTip = document.getElementById('mypage-save-tip-btn');
+      if(saveTip) saveTip.style.display = showFull ? '' : 'none';
       var guide = document.getElementById('mypage-state-card');
       var title = document.getElementById('mypage-state-title');
       var body = document.getElementById('mypage-state-body');
