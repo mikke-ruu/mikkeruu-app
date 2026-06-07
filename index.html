@@ -4161,6 +4161,8 @@
       if(logoutRow) logoutRow.style.display = isLoggedIn ? '' : 'none';
       var saveTip = document.getElementById('mypage-save-tip-btn');
       if(saveTip) saveTip.style.display = showFull ? '' : 'none';
+      var evEmpty = document.getElementById('mypage-event-empty');
+      if(evEmpty) evEmpty.style.display = showFull ? '' : 'none';
       var guide = document.getElementById('mypage-state-card');
       var title = document.getElementById('mypage-state-title');
       var body = document.getElementById('mypage-state-body');
@@ -4169,7 +4171,7 @@
       if(noticeHelper){
         noticeHelper.textContent = hasBazaarApp ? '出店者向け・イベント別・あなた宛ての連絡はここに届きます。' : 'イベント別・あなた宛ての連絡はここに届きます。';
       }
-      var showGuide = mode==='admin-empty' || mode==='empty';
+      var showGuide = mode==='empty';
       if(!guide || !title || !body || !actions) return;
       guide.classList.toggle('show', showGuide);
       if(!showGuide) return;
@@ -4186,11 +4188,10 @@
         if(!isLoggedIn){
           title.textContent = 'ログインして申込状況を確認';
           body.textContent = '申込時に使ったメールアドレスを入力すると、ログインリンクをお送りします。';
-          actions.innerHTML = '<div style="display:flex;flex-direction:column;gap:8px;width:100%">'
-            +'<input class="input" id="mypage-login-email" type="email" placeholder="メールアドレス" style="width:100%;box-sizing:border-box">'
+          actions.style.cssText = 'display:flex;flex-direction:column;gap:8px';
+          actions.innerHTML = '<input class="input" id="mypage-login-email" type="email" placeholder="メールアドレス" style="width:100%;box-sizing:border-box">'
             +'<button class="primary" onclick="sendMypageMagicLink()">ログインリンクを送る</button>'
-            +'<button class="secondary" style="font-size:11px" onclick="showPage(\'events\')">申込はこちら</button>'
-            +'</div>';
+            +'<button class="secondary" style="font-size:11px" onclick="showPage(\'events\')">申込はこちら</button>';
         }else{
           title.textContent = 'まだ申込はありません';
           body.textContent = 'イベントやバザールに申込すると、このページに申込状況・確定連絡・運営からのお知らせが表示されます。';
