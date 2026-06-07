@@ -2232,7 +2232,7 @@
         mapUrl: row.map_url || '',
         image: row.cover_image_url || '',
         coverImage: row.cover_image_url || '',
-        flyerImages: Array.isArray(row.gallery_image_urls) ? row.gallery_image_urls : [],
+        flyerImages: (Array.isArray(row.gallery_image_urls) && row.gallery_image_urls.length) ? row.gallery_image_urls : (Array.isArray(ex.flyerImages) ? ex.flyerImages : []),
         deadline: row.application_deadline || '',
         capacity: row.capacity || 0,
         lineUrl: row.line_group_url || '',
@@ -2378,7 +2378,8 @@
           zoomId:           ev.zoomId || '',
           zoomPass:         ev.zoomPass || '',
           payment:          ev.payment || '',
-          party:            ev.party || {enabled:false}
+          party:            ev.party || {enabled:false},
+          flyerImages:      ev.flyerImages || []
         }
       };
       try{
@@ -10914,9 +10915,12 @@ mikke.ruu2025@gmail.com`,
         ev.status = draft.status || 'draft';
         if(draft.coverCount) ev.flyers = draft.coverCount;
         if(draft.galleryCount) ev.photos = draft.galleryCount;
-        if(draft._galleryImages && draft._galleryImages.length){
-          ev.flyerImages = draft._galleryImages;
-        }
+        // galleryPreviewSrcs を優先（入れ替え・削除・既存画像を保持）
+        // 新規アップロードが Storage 化された場合は _galleryImages で上書き
+        var finalGallery = (draft._galleryImages && draft._galleryImages.length)
+          ? draft._galleryImages
+          : (draft.galleryPreviewSrcs || []);
+        ev.flyerImages = finalGallery;
         if(draft._coverImage){
           ev.coverImage = draft._coverImage;
         }
