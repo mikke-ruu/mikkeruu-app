@@ -10257,19 +10257,67 @@ mikke.ruu2025@gmail.com`,
       host.style.marginTop = '8px';
       host.innerHTML = list.map(function(src, idx){
         var lbl = idx===0 ? '<span style="position:absolute;bottom:0;left:0;right:0;font-size:9px;font-weight:900;color:#fff;background:rgba(0,0,0,.45);text-align:center;padding:2px 0">一覧サムネ</span>' : '';
-        return '<span style="position:relative;display:inline-block;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;flex-shrink:0">'+
-          '<img src="'+src+'" alt="gallery-'+(idx+1)+'" style="width:52px;height:69px;object-fit:cover;display:block">'+
-          lbl+
-          '<button type="button" onclick="removeEEGalleryItem(this)" style="position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;border:none;font-size:11px;line-height:18px;cursor:pointer;padding:0;text-align:center">×</button>'+
+        var btnL = idx>0
+          ? '<button type="button" onclick="moveEEGalleryItem(this,-1)" style="flex:1;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:11px;padding:1px 0;cursor:pointer;color:var(--ink)">←</button>'
+          : '<span style="flex:1"></span>';
+        var btnR = idx<list.length-1
+          ? '<button type="button" onclick="moveEEGalleryItem(this,1)" style="flex:1;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:11px;padding:1px 0;cursor:pointer;color:var(--ink)">→</button>'
+          : '<span style="flex:1"></span>';
+        return '<span class="ee-gal-item" style="display:inline-flex;flex-direction:column;align-items:stretch;flex-shrink:0;gap:3px">'+
+          '<span style="position:relative;display:block;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff">'+
+            '<img src="'+src+'" alt="gallery-'+(idx+1)+'" style="width:52px;height:69px;object-fit:cover;display:block">'+
+            lbl+
+            '<button type="button" onclick="removeEEGalleryItem(this)" style="position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;border:none;font-size:11px;line-height:18px;cursor:pointer;padding:0;text-align:center">×</button>'+
+          '</span>'+
+          '<div style="display:flex;gap:2px">'+btnL+btnR+'</div>'+
         '</span>';
       }).join('');
     }
 
-    function removeEEGalleryItem(btn){
-      var span = btn ? btn.parentElement : null;
-      if(span) span.remove();
+    function _eeGalFindItem(btn){
+      var el = btn;
+      while(el){
+        if(el.className && el.className.indexOf('ee-gal-item')>=0) return el;
+        el = el.parentElement;
+      }
+      return null;
+    }
+
+    function _eeGalSources(){
       var host = document.getElementById('ee-gallery-preview');
-      if(host && !host.querySelectorAll('img').length) host.style.display = 'none';
+      if(!host) return [];
+      return Array.from(host.querySelectorAll('.ee-gal-item')).map(function(it){
+        var img = it.querySelector('img');
+        return img ? (img.getAttribute('src')||img.src||'') : '';
+      }).filter(Boolean);
+    }
+
+    function removeEEGalleryItem(btn){
+      var host = document.getElementById('ee-gallery-preview');
+      if(!host) return;
+      var items = Array.from(host.querySelectorAll('.ee-gal-item'));
+      var item = _eeGalFindItem(btn);
+      var idx = items.indexOf(item);
+      if(idx < 0) return;
+      var sources = _eeGalSources();
+      sources.splice(idx, 1);
+      renderEEGalleryPreviewFromSources(sources);
+      if(!sources.length) host.style.display = 'none';
+      persistEventEditDraft(__eventEditContext.eventId, true);
+    }
+
+    function moveEEGalleryItem(btn, dir){
+      var host = document.getElementById('ee-gallery-preview');
+      if(!host) return;
+      var items = Array.from(host.querySelectorAll('.ee-gal-item'));
+      var item = _eeGalFindItem(btn);
+      var idx = items.indexOf(item);
+      if(idx < 0) return;
+      var sources = _eeGalSources();
+      var t = idx + dir;
+      if(t < 0 || t >= sources.length) return;
+      var tmp = sources[idx]; sources[idx] = sources[t]; sources[t] = tmp;
+      renderEEGalleryPreviewFromSources(sources);
       persistEventEditDraft(__eventEditContext.eventId, true);
     }
 
