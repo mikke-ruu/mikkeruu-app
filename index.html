@@ -2137,9 +2137,6 @@
     }
     function saveAppState(){
       var payload = {
-        events: Array.isArray(EVENTS) ? EVENTS : [],
-        applications: Array.isArray(APPLICATIONS) ? APPLICATIONS : [],
-        partyApplications: Array.isArray(PARTY_APPLICATIONS) ? PARTY_APPLICATIONS : [],
         mailLogs: Array.isArray(MAIL_LOGS) ? MAIL_LOGS : [],
         notices: Array.isArray(NOTICES) ? NOTICES : [],
         albums: Array.isArray(ALBUMS) ? ALBUMS : [],
@@ -2167,9 +2164,6 @@
     function loadAppState(){
       var state = parseJsonSafe(localStorage.getItem(APP_STATE_KEY), null);
       if(state){
-        if(Array.isArray(state.events)) EVENTS = state.events;
-        if(Array.isArray(state.applications)) APPLICATIONS = state.applications;
-        if(Array.isArray(state.partyApplications)) PARTY_APPLICATIONS = state.partyApplications;
         if(Array.isArray(state.mailLogs)) MAIL_LOGS = state.mailLogs;
         if(Array.isArray(state.notices)) NOTICES = state.notices;
         if(Array.isArray(state.albums)) ALBUMS = state.albums;
@@ -2197,30 +2191,13 @@
       if(idx>=0) list[idx] = item;
       else list.unshift(item);
     }
-    // Supabaseイベントをローカルへマージ（上書きではなく統合）。
-    // Supabase側が空/未設定の"細かい項目"はローカルの入力値を保持し、未保存データが消えないようにする。
+    // Supabaseが唯一の正（localStorageとの競合なし）
     function upsertSupabaseEvent(list, item){
       if(!Array.isArray(list) || !item || !item.id) return;
       var idx = list.findIndex(function(x){
         return x && (x.id===item.id || (x.supabaseId && x.supabaseId===item.supabaseId));
       });
       if(idx < 0){ list.unshift(item); return; }
-      var local = list[idx];
-      var isEmpty = function(v){ return v===undefined || v===null || v==='' ; };
-      // Supabaseが空でローカルに値がある項目はローカルを残す（未保存入力の保護）
-      ['content','detail','recruitStart','eyecatchDeadline','zoomDate','zoomTime','zoomId','zoomPass','payment','mapUrl','lineGroupUrl']
-        .forEach(function(f){ if(isEmpty(item[f]) && !isEmpty(local[f])) item[f] = local[f]; });
-      // 交流会(party)：Supabaseが未設定(無効/空)でローカルが有効ならローカルを保持
-      var sbPartyOn = item.party && item.party.enabled;
-      var localPartyOn = local.party && local.party.enabled;
-      if(!sbPartyOn && localPartyOn) item.party = local.party;
-      // 画像系：Supabaseが空ならローカルを残す
-      if((!item.flyerImages || !item.flyerImages.length) && local.flyerImages && local.flyerImages.length) item.flyerImages = local.flyerImages;
-      if(isEmpty(item.coverImage) && !isEmpty(local.coverImage)){ item.coverImage = local.coverImage; item.image = local.coverImage; }
-      // 出店料・定員：Supabaseが空ならローカルを残す
-      if((!item.feeOptions || !item.feeOptions.length) && local.feeOptions && local.feeOptions.length) item.feeOptions = local.feeOptions;
-      var capEmpty = !item.capacities || !Object.keys(item.capacities).length || Object.keys(item.capacities).every(function(k){return !item.capacities[k];});
-      if(capEmpty && local.capacities && Object.keys(local.capacities).length) item.capacities = local.capacities;
       list[idx] = item;
     }
     function datePartFromIso(v){
@@ -2260,7 +2237,7 @@
         lineGroupUrl: row.line_group_url || '',
         feeOptions: Array.isArray(row.fee_options) ? row.fee_options : [],
         capacities: row.capacities || {},
-        status: row.status === 'draft' ? 'draft' : 'public',
+        status: row.status || 'public',
         // extra(JSON)から復元する細かい項目
         recruitStart: ex.recruitStart || '',
         eyecatchDeadline: ex.eyecatchDeadline || '',
@@ -2279,13 +2256,13 @@
       try{
         var res = await sb.from('events')
           .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,content,detail,cover_image_url,gallery_image_urls,line_group_url,capacity,application_deadline,fee_options,capacities,extra')
-          .in('status', ['public','closed','past'])
+          .in('status', CURRENT_USER_ROLE==='admin' ? ['public','closed','past','draft'] : ['public','closed','past'])
           .order('starts_at', {ascending:true});
         // 新カラム未追加の旧DB向けフォールバック
         if(res.error && res.error.message && res.error.message.indexOf('does not exist')!==-1){
           res = await sb.from('events')
             .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,detail,cover_image_url,line_group_url,capacity,application_deadline')
-            .in('status', ['public','closed','past'])
+            .in('status', CURRENT_USER_ROLE==='admin' ? ['public','closed','past','draft'] : ['public','closed','past'])
             .order('starts_at', {ascending:true});
         }
         if(res.error) throw res.error;
@@ -2408,7 +2385,7 @@
           if(res.error) throw res.error;
         } else {
           // 新規挿入（admin は SELECT も可なので id を読み返す）
-          var res2 = await sb.from('events').insert(payload).select('id').single();
+          var res2 = await sb.from('events').upsert(payload, {onConflict:'slug'}).select('id').single();
           if(res2.error) throw res2.error;
           if(res2.data && res2.data.id){
             ev.supabaseId = res2.data.id;
@@ -2680,6 +2657,7 @@
         if(CURRENT_USER_ROLE === 'admin'){
           var el=document.getElementById('admin-login-pwd'); if(el) el.value='';
           renderAdminLoginState();
+          loadPublicEventsFromSupabase();
           if(typeof loadAdminApplicationsFromSupabase==='function') loadAdminApplicationsFromSupabase({silent:true});
           if(typeof loadAdminMailLogsFromSupabase==='function') loadAdminMailLogsFromSupabase({silent:true});
           showToast('ログインしました','success');
@@ -3117,36 +3095,10 @@
       saveAppState();
     }
     function purgeSeedDataOnce(){
-      // テスト用シード（仮データ）を削除し、以後は再投入しない（Supabaseの実データのみで運用）
-      var isSeedId = function(id){ return typeof id==='string' && id.indexOf('seed-')===0; };
-      var changed = false;
+      // イベント・申込はlocalStorageに保存しなくなったため不要。念のためメモリ内seed除去のみ。
       if(Array.isArray(EVENTS)){
-        var beforeE = EVENTS.length;
-        EVENTS = EVENTS.filter(function(e){ return !(e && isSeedId(e.id)); });
-        if(EVENTS.length !== beforeE) changed = true;
+        EVENTS = EVENTS.filter(function(e){ return !(e && typeof e.id==='string' && e.id.indexOf('seed-')===0); });
       }
-      if(Array.isArray(APPLICATIONS)){
-        var beforeA = APPLICATIONS.length;
-        APPLICATIONS = APPLICATIONS.filter(function(a){
-          return !(a && (isSeedId(a.event) || isSeedId(a.id)));
-        });
-        if(APPLICATIONS.length !== beforeA) changed = true;
-      }
-      if(Array.isArray(PARTY_APPLICATIONS)){
-        var beforeP = PARTY_APPLICATIONS.length;
-        PARTY_APPLICATIONS = PARTY_APPLICATIONS.filter(function(p){
-          return !(p && (isSeedId(p.event) || isSeedId(p.eventId)));
-        });
-        if(PARTY_APPLICATIONS.length !== beforeP) changed = true;
-      }
-      // Supabase接続時はSupabaseを唯一の正とし、前セッションのローカル残骸（手動/試作の申込）を掃除する
-      if(typeof getSupabaseClient==='function' && getSupabaseClient() && Array.isArray(APPLICATIONS)){
-        var beforeL = APPLICATIONS.length;
-        APPLICATIONS = APPLICATIONS.filter(function(a){ return a && a.source === 'supabase'; });
-        if(APPLICATIONS.length !== beforeL) changed = true;
-      }
-      try{ localStorage.setItem(REAL_SEED_KEY, '1'); }catch(e){}
-      if(changed){ markStateDirty(); saveAppState(); }
     }
     setInterval(function(){if(__stateDirty) saveAppState();}, 1500);
     window.addEventListener('beforeunload', saveAppState);
