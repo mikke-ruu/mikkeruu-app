@@ -2156,7 +2156,7 @@
         currentUserRole: CURRENT_USER_ROLE || 'general',
         currentUserId: CURRENT_USER_ID || '',
         currentUserEmail: CURRENT_USER_EMAIL || '',
-        currentUserEvents: CURRENT_USER_EVENTS || {},
+        // currentUserEvents は Supabase から都度取得するので保存しない
         favoritesByUser: FAVORITES_BY_USER || {},
         applyDrafts: APPLY_DRAFTS || {},
         currentDetailEventId: CURRENT_DETAIL_EVID || '',
@@ -2184,7 +2184,7 @@
         CURRENT_USER_ROLE = state.currentUserRole || CURRENT_USER_ROLE || 'general';
         CURRENT_USER_ID = state.currentUserId || CURRENT_USER_ID || '';
         CURRENT_USER_EMAIL = state.currentUserEmail || CURRENT_USER_EMAIL || '';
-        CURRENT_USER_EVENTS = state.currentUserEvents || CURRENT_USER_EVENTS || {};
+        // CURRENT_USER_EVENTS は Supabase から都度取得するので復元しない
         FAVORITES_BY_USER = (state.favoritesByUser && typeof state.favoritesByUser==='object') ? state.favoritesByUser : (FAVORITES_BY_USER || {});
         APPLY_DRAFTS = (state.applyDrafts && typeof state.applyDrafts==='object') ? state.applyDrafts : (APPLY_DRAFTS || {});
         CURRENT_DETAIL_EVID = state.currentDetailEventId || CURRENT_DETAIL_EVID || '';
@@ -6194,6 +6194,16 @@
     // マイページのイベントカードを EVENTS と紐付け
     function renderMypageEventCards(){
       renderMypageAccessState();
+      // 未ログイン・管理者はイベントカードを全非表示にして終了
+      var _mode = getMypageAccessMode();
+      if(_mode === 'empty' || _mode === 'admin-empty'){
+        ['mypage-event-1','mypage-event-2','mypage-event-3'].forEach(function(cid){
+          var el = document.getElementById(cid); if(!el) return;
+          var card = el.closest('.mypage-event');
+          if(card){ card.style.display='none'; card.dataset.evavailable='0'; }
+        });
+        return;
+      }
       var nextUserEvents = {};
       var stateLabel = function(s, ev){var isEv=isParticipantOnlyEvent(ev);return s==='confirmed'?(isEv?'参加確定':'出店確定'):s==='applied'?(isEv?'申込中':'申込中'):'終了';};
       var stateClass = function(s){return s==='ended'?'mint':(s==='applied'?'orange':'');};
