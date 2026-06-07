@@ -49,7 +49,7 @@
     .detail-hero{position:relative;border:1px solid var(--line);border-radius:22px;overflow:hidden;background:#f5f2f8;cursor:zoom-in;margin-bottom:14px}
     .detail-hero-slide{display:none}
     .detail-hero-slide.active{display:block}
-    .detail-hero-slide img{width:100%;aspect-ratio:16/9;display:block;object-fit:contain;background:#f5f2f8}
+    .detail-hero-slide img{width:100%;height:clamp(140px,40vw,200px);display:block;object-fit:cover;background:#f5f2f8}
     .detail-hero-nav{position:absolute;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:999px;border:1px solid rgba(255,255,255,.9);background:rgba(255,255,255,.92);color:var(--ink);display:grid;place-items:center;font-size:18px;font-weight:900;z-index:2}
     .detail-hero-nav.prev{left:10px}
     .detail-hero-nav.next{right:10px}
@@ -5783,15 +5783,18 @@
         ? '<div class="section-head" style="margin-top:14px"><h2 class="section-title">出店者（'+confirmedApps.length+'店舗）</h2></div><div class="exhibitor-public-grid">'+exhibitorsHtml+'</div>'
         : '';
 
-      host.innerHTML =
-        '<article class="card event-card">'+
-          '<div class="detail-hero" onclick="openDetailHeroCurrentImage()">'+
+      var heroHtml = detailImages.length
+        ? '<div class="detail-hero" onclick="openDetailHeroCurrentImage()">'+
             '<div id="detail-hero-track">'+heroSlidesHtml+'</div>'+
             (detailImages.length>1 ? '<button type="button" class="detail-hero-nav prev" onclick="event.stopPropagation();moveDetailHeroSlide(-1)">‹</button><button type="button" class="detail-hero-nav next" onclick="event.stopPropagation();moveDetailHeroSlide(1)">›</button>' : '')+
-            '<span class="detail-hero-counter" id="detail-hero-counter">1 / '+detailImages.length+'</span>'+
+            '<span class="detail-hero-counter" id="detail-hero-counter">'+detailImages.length+'</span>'+
           '</div>'+
           favoriteButton+
-          heroDotsHtml+
+          heroDotsHtml
+        : favoriteButton;
+      host.innerHTML =
+        '<article class="card event-card">'+
+          heroHtml+
           '<div style="display:flex;gap:6px;flex-wrap:wrap">'+kindBadge+statusBadge+'</div>'+
           '<h1 class="event-title">'+ev.name.replace(' たまプラーザ','<br>たまプラーザ').replace(' 錦糸町','<br>錦糸町').replace(' 宮前平','<br>宮前平').replace(' 渋谷','<br>渋谷')+'</h1>'+
           '<div class="event-meta">'+
@@ -11042,10 +11045,33 @@ mikke.ruu2025@gmail.com`,
           return uploadOrReadFile(file, 'events/'+ev.id+'/gallery_'+i+'_'+Date.now()+'.'+ext);
         })).then(function(list){return list.filter(function(s){return !!s;});});
       };
+      // data-URL を Storage にアップロード（既存画像を自動でURL化）
+      var uploadGalleryPreviews = function(srcs){
+        if(!srcs || !srcs.length) return Promise.resolve([]);
+        var sb = getSupabaseClient();
+        return Promise.all(srcs.map(function(src, i){
+          if(!src) return Promise.resolve('');
+          if(src.indexOf('data:')===0 && sb){
+            return new Promise(function(resolve){
+              try{
+                var arr=src.split(',');
+                var mime=(arr[0].match(/:(.*?);/)||['','image/jpeg'])[1];
+                var bstr=atob(arr[1]),n=bstr.length,u8=new Uint8Array(n);
+                for(var j=0;j<n;j++) u8[j]=bstr.charCodeAt(j);
+                var blob=new Blob([u8],{type:mime});
+                var ext=mime.split('/')[1]||'jpg';
+                var path='events/'+ev.id+'/gal_'+i+'_'+Date.now()+'.'+ext;
+                uploadFileToStorage(path,blob).then(function(url){ resolve(url||src); });
+              }catch(e){ resolve(src); }
+            });
+          }
+          return Promise.resolve(src);
+        })).then(function(list){ return list.filter(Boolean); });
+      };
 
       Promise.all([
         uploadCoverFiles(draft.coverFiles||[]),
-        uploadGalleryFiles(draft.galleryFiles||[])
+        uploadGalleryPreviews(draft.galleryPreviewSrcs||[])
       ]).then(function(result){
         var coverImgs = result[0] || [];
         var galleryImgs = result[1] || [];
