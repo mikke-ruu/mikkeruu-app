@@ -2310,6 +2310,7 @@
         comment: row.appeal || '',
         adminRequest: row.admin_memo || '',
         createdAt: datePartFromIso(row.created_at),
+        answers: row.answers || {},
         source: 'supabase'
       };
     }
@@ -2559,7 +2560,7 @@
         var session = current && current.data && current.data.session;
         if(!session || !session.user || !CURRENT_USER_EMAIL) return false;
         var res = await sb.from('applications')
-          .select('id,event_id,user_id,email,person_name,kana,shop_name,category,content,appeal,instagram,uword_id,attendee_count,status,eyecatch_image_url,admin_memo,created_at')
+          .select('id,event_id,user_id,email,person_name,kana,shop_name,category,content,appeal,instagram,uword_id,attendee_count,status,eyecatch_image_url,admin_memo,answers,created_at')
           .order('created_at', {ascending:false});
         if(res.error) throw res.error;
         var remoteApps = (res.data||[]).map(mapSupabaseApplicationRow);
@@ -2720,7 +2721,7 @@
           return false;
         }
         var res = await sb.from('applications')
-          .select('id,event_id,user_id,email,person_name,kana,shop_name,category,content,appeal,instagram,uword_id,attendee_count,status,eyecatch_image_url,admin_memo,created_at')
+          .select('id,event_id,user_id,email,person_name,kana,shop_name,category,content,appeal,instagram,uword_id,attendee_count,status,eyecatch_image_url,admin_memo,answers,created_at')
           .order('created_at', {ascending:false});
         if(res.error) throw res.error;
         var supabaseEventKeys = new Set();
@@ -3929,7 +3930,24 @@
         eyecatch_image_url: data.eyecatch || null,
         admin_memo: data.adminRequest || null,
         public_profile_enabled: !data.isParticipantEvent,
-        privacy_consent_at: new Date().toISOString()
+        privacy_consent_at: new Date().toISOString(),
+        answers: {
+          first: data.first || 'first',
+          member: data.member || '',
+          uwid: data.uwid || '',
+          achiever: data.achiever || '',
+          social: data.social || '',
+          categoryLabel: data.categoryLabel || '',
+          shopName: data.isParticipantEvent ? '' : (data.shopName || ''),
+          content: data.isParticipantEvent ? '' : (data.content || ''),
+          comment: data.isParticipantEvent ? '' : (data.comment || ''),
+          adminRequest: data.adminRequest || '',
+          feePlanId: data.feePlanId || '',
+          feePlanLabel: data.feePlanLabel || '',
+          feeYen: data.feeYen || 0,
+          party: data.party || '',
+          attendeeCount: data.attendeeCount || 1
+        }
       };
     }
     async function saveApplicationToSupabase(data, localAppId){
