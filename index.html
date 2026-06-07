@@ -9708,6 +9708,7 @@ mikke.ruu2025@gmail.com`,
     function buildEventRevenue(ev){
       var opts = ev.feeOptions || [];
       var isPast = getEventEffectiveStatus(ev)==='past';
+      // イベント参加型（変更なし）
       if(isParticipantOnlyEvent(ev)){
         var eventPlans = opts.length ? opts : [{id:'event-free', label:'参加費', yen:0}];
         var eventApps = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card'))
@@ -9730,71 +9731,64 @@ mikke.ruu2025@gmail.com`,
             '<div class="ev-revenue-row total" style="margin-top:10px"><span class="lbl">'+(isPast?'計算上の総合計':'見込み総合計')+'</span><span class="val">¥'+total.toLocaleString()+'</span></div>'+
           '</div>';
       }
+      // バザール: 出店料のみ（交流会売上は buildPartyRevenue で交流会プレビュー直下に表示）
       var apps = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card'))
         .filter(function(c){return c.dataset.event === ev.id && c.dataset.status === 'confirmed'})
-        .map(function(c){return {feePlan:c.dataset.feeplan||'', party:c.dataset.party||''}});
+        .map(function(c){return {feePlan:c.dataset.feeplan||''}});
       if(isPast && ev.pastExhibitors){
-        ev.pastExhibitors.forEach(function(p){apps.push({feePlan:p.feePlan||'', party:p.party||(p.partyJoined?'yes':'')})});
+        ev.pastExhibitors.forEach(function(p){apps.push({feePlan:p.feePlan||''})});
       }
-      // === 出店料 ===
       var planSummary = opts.map(function(o){
         var cnt = apps.filter(function(a){return a.feePlan===o.id}).length;
-        return {opt:o, count:cnt, sub:o.yen*cnt};
+        return {opt:o, count:cnt, sub:(parseInt(o.yen,10)||0)*cnt};
       });
       var feeTotal = planSummary.reduce(function(s,x){return s+x.sub},0);
+      var actual = (isPast && ev.actualRevenue!=null) ? ev.actualRevenue : feeTotal;
       var unspecified = apps.filter(function(a){return !a.feePlan || !opts.find(function(o){return o.id===a.feePlan})}).length;
-      // === 交流会 ===
-      var partyEnabled = ev.party && ev.party.enabled;
-      var partyFee = partyEnabled ? (parseInt(ev.party.fee||0)||0) : 0;
-      // 参加者数：出店者の party=yes ＋ 一般参加者（手入力 ev.party.generalCount）
-      var exhibitorPartyCount = apps.filter(function(a){return a.party==='yes'}).length;
-      var generalPartyCount = partyEnabled ? (parseInt(ev.party.generalCount||0)||0) : 0;
-      var partyTotalCount = exhibitorPartyCount + generalPartyCount;
-      var partyTotal = partyFee * partyTotalCount;
-      // === 合計 ===
-      var grandTotal = feeTotal + partyTotal;
-      var actual = (ev.actualRevenue!=null) ? ev.actualRevenue : grandTotal;
-      var label = isPast ? '実績売上' : '見込み売上';
+      var label = isPast ? '実績売上（出店料）' : '見込み売上（出店料）';
 
-      // 出店料セクション
-      var feeRowsHtml = opts.length ? planSummary.map(function(s){
-        return '<div class="ev-revenue-row"><span class="lbl">'+s.opt.label+' ¥'+s.opt.yen.toLocaleString()+' × '+s.count+'人</span><span class="val">¥'+s.sub.toLocaleString()+'</span></div>';
+      // 詳細行
+      var detailRows = opts.length ? planSummary.map(function(ps){
+        return '<div class="ev-revenue-row"><span class="lbl">'+ps.opt.label+' ¥'+(parseInt(ps.opt.yen,10)||0).toLocaleString()+' × '+ps.count+'人</span><span class="val">¥'+ps.sub.toLocaleString()+'</span></div>';
       }).join('') : '<div class="ev-revenue-row"><span class="lbl">出店料プラン未設定</span></div>';
-      var unspecifiedHtml = unspecified>0 ?
-        '<div class="ev-revenue-row" style="font-size:10px;color:#c8824f"><span class="lbl">⚠ プラン未指定</span><span class="val">'+unspecified+'人</span></div>' : '';
-      var feeSection = '<p class="filter-label" style="margin-top:0">出店料</p>'+
-        feeRowsHtml + unspecifiedHtml +
-        '<div class="ev-revenue-row" style="border-top:1px dashed #fde8ee;padding-top:5px;margin-top:4px"><span class="lbl">出店料 小計</span><span class="val">¥'+feeTotal.toLocaleString()+'</span></div>';
-
-      // 交流会セクション
-      var partySection = '';
-      if(partyEnabled){
-        var generalInputHtml = '<div class="ev-revenue-actual" style="margin-top:6px"><input type="number" id="ev-general-'+ev.id+'" value="'+generalPartyCount+'" placeholder="一般参加者数"><button onclick="saveGeneralCount(\''+ev.id+'\')">一般参加者数を保存</button></div>';
-        partySection = '<p class="filter-label" style="margin-top:14px">交流会</p>'+
-          '<div class="ev-revenue-row"><span class="lbl">参加費 ¥'+partyFee.toLocaleString()+' × 出店者 '+exhibitorPartyCount+'人</span><span class="val">¥'+(partyFee*exhibitorPartyCount).toLocaleString()+'</span></div>'+
-          '<div class="ev-revenue-row"><span class="lbl">参加費 ¥'+partyFee.toLocaleString()+' × 一般 '+generalPartyCount+'人</span><span class="val">¥'+(partyFee*generalPartyCount).toLocaleString()+'</span></div>'+
-          '<div class="ev-revenue-row" style="border-top:1px dashed #fde8ee;padding-top:5px;margin-top:4px"><span class="lbl">交流会 小計</span><span class="val">¥'+partyTotal.toLocaleString()+'</span></div>'+
-          generalInputHtml;
+      if(unspecified>0){
+        detailRows += '<div class="ev-revenue-row" style="font-size:10px;color:#c8824f"><span class="lbl">⚠ プラン未指定</span><span class="val">'+unspecified+'人</span></div>';
       }
-
       var actualInputHtml = isPast ?
         '<div class="ev-revenue-actual" style="margin-top:8px"><input type="number" id="ev-actual-'+ev.id+'" value="'+actual+'" placeholder="実際の合計額（円）"><button onclick="saveActualRevenue(\''+ev.id+'\')">実績を保存</button></div>' : '';
-      var diffHtml = '';
-      if(isPast && ev.actualRevenue!=null && ev.actualRevenue !== grandTotal){
-        var diff = ev.actualRevenue - grandTotal;
-        var diffSign = diff>=0?'+':'';
-        diffHtml = '<div class="ev-revenue-row" style="font-size:10px"><span class="lbl">計算上との差</span><span class="val" style="color:'+(diff>=0?'#3ba48a':'#c84a4a')+'">'+diffSign+'¥'+Math.abs(diff).toLocaleString()+'</span></div>';
-      }
-      var grandRow = '<div class="ev-revenue-row total" style="margin-top:10px"><span class="lbl">'+(isPast?'計算上の総合計':'見込み総合計')+'</span><span class="val">¥'+grandTotal.toLocaleString()+'</span></div>';
 
-      return '<p class="ev-section-title"><svg><use href="#i-file"/></svg>'+label+'</p>'+
-        '<div class="ev-revenue">'+
-          feeSection+
-          partySection+
-          grandRow+
-          diffHtml+
-          actualInputHtml+
+      return '<p class="ev-section-title"><svg><use href="#i-file"/></svg>'+label+
+          '<button type="button" style="margin-left:auto;font-size:10px;font-weight:900;color:var(--sub);background:none;border:1px solid var(--line);border-radius:99px;padding:2px 10px;cursor:pointer" onclick="toggleAdminInfoBlock(\'ev-rev-'+ev.id+'\',this)">詳細</button>'+
+        '</p>'+
+        '<div class="ev-revenue" style="padding:8px 12px">'+
+          '<div class="ev-revenue-row total" style="margin:0"><span class="lbl">'+(isPast?'計算上の合計':'見込み合計')+'</span><span class="val">¥'+actual.toLocaleString()+'</span></div>'+
+        '</div>'+
+        '<div id="ev-rev-'+ev.id+'" style="display:none">'+
+          '<div class="ev-revenue">'+detailRows+actualInputHtml+'</div>'+
         '</div>';
+    }
+
+    // 交流会売上（交流会プレビュー直下に表示）
+    function buildPartyRevenue(ev){
+      if(!ev || !ev.party || !ev.party.enabled) return '';
+      var isPast = getEventEffectiveStatus(ev)==='past';
+      var partyFee = parseInt(ev.party.fee||0)||0;
+      var generalPartyCount = parseInt(ev.party.generalCount||0)||0;
+      var apps = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card'))
+        .filter(function(c){return c.dataset.event === ev.id && c.dataset.status === 'confirmed'})
+        .map(function(c){return {party:c.dataset.party||''}});
+      if(isPast && ev.pastExhibitors){
+        ev.pastExhibitors.forEach(function(p){apps.push({party:p.party||(p.partyJoined?'yes':'')})});
+      }
+      var exhibitorPartyCount = apps.filter(function(a){return a.party==='yes'}).length;
+      var partyTotal = partyFee * (exhibitorPartyCount + generalPartyCount);
+      var generalInputHtml = '<div class="ev-revenue-actual" style="margin-top:6px"><input type="number" id="ev-general-'+ev.id+'" value="'+generalPartyCount+'" placeholder="一般参加者数"><button onclick="saveGeneralCount(\''+ev.id+'\')">一般参加者数を保存</button></div>';
+      return '<div class="ev-revenue" style="margin-top:4px;background:#f0fdf8;border-color:#cce7d8">'+
+        '<div class="ev-revenue-row"><span class="lbl" style="color:#4a9e87">参加費 ¥'+partyFee.toLocaleString()+' × 出店者 '+exhibitorPartyCount+'人</span><span class="val">¥'+(partyFee*exhibitorPartyCount).toLocaleString()+'</span></div>'+
+        '<div class="ev-revenue-row"><span class="lbl" style="color:#4a9e87">参加費 ¥'+partyFee.toLocaleString()+' × 一般 '+generalPartyCount+'人</span><span class="val">¥'+(partyFee*generalPartyCount).toLocaleString()+'</span></div>'+
+        '<div class="ev-revenue-row total" style="margin-top:6px;border-color:#cce7d8"><span class="lbl">交流会 合計</span><span class="val">¥'+partyTotal.toLocaleString()+'</span></div>'+
+        generalInputHtml+
+      '</div>';
     }
     function saveGeneralCount(evId){
       var ev = EVENTS.find(function(x){return x.id===evId});
@@ -9974,6 +9968,7 @@ mikke.ruu2025@gmail.com`,
       if(!isEventOnly && ev.party && ev.party.enabled){
         partyAdminHtml =
           buildPartyPublicPreview(ev.party)+
+          buildPartyRevenue(ev)+
           '<button type="button" class="full" style="margin-top:8px;background:#fff;border:1px solid #3ba48a;color:#3ba48a" onclick="openEventAppsFromSummary(\''+ev.id+'\',\'party\')">交流会申込者一覧を見る</button>';
       }
 
