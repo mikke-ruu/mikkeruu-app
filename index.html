@@ -4676,6 +4676,9 @@
         if(id==='admin-mail-logs' && typeof loadAdminMailLogsFromSupabase==='function'){
           loadAdminMailLogsFromSupabase({silent:true});
         }
+        if(id==='admin-survey' && typeof renderAdminSurveys==='function'){
+          renderAdminSurveys();
+        }
       }else{
         if(backdrop) backdrop.classList.remove('open');
       }
@@ -6304,9 +6307,27 @@
         if(photoEl){
           photoEl.style.backgroundImage = 'url('+getEventCoverImage(ev)+')';
         }
+        // 出店者アンケート常設リンク（終了したバザールのみ・匿名回答）
+        var isEndedBazaar = (state==='ended') && !isParticipantOnlyEvent(ev);
         var surveyLink = detailEl.querySelector('a[onclick*="openExhibitorSurveyForm"]');
-        if(surveyLink){
+        if(isEndedBazaar){
+          var actionsHost = detailEl.querySelector('.home-expanded-actions');
+          if(!actionsHost){
+            actionsHost = document.createElement('div');
+            actionsHost.className = 'home-expanded-actions';
+            detailEl.insertBefore(actionsHost, detailEl.firstChild);
+          }
+          if(!surveyLink){
+            surveyLink = document.createElement('a');
+            surveyLink.className = 'icon-action';
+            surveyLink.href = 'javascript:void(0)';
+            surveyLink.innerHTML = '<svg class="icon"><use href="#i-file"/></svg>出店アンケート';
+            actionsHost.appendChild(surveyLink);
+          }
           surveyLink.setAttribute('onclick', "openExhibitorSurveyForm('"+ev.id+"')");
+          surveyLink.style.display = '';
+        }else if(surveyLink){
+          surveyLink.style.display = 'none';
         }
         var partyLink = detailEl.querySelector('a[href="#party"]');
         if(partyLink){
@@ -6637,6 +6658,88 @@
       var questions = Array.isArray(tpl.questions) ? tpl.questions : [];
       return questions.some(function(q){ return q && q.type==='rating'; });
     }
+    // アンケート集計（パネル内インライン表示用）
+    function renderSurveyAggregateInline(type, surveys, color){
+      if(!surveys || !surveys.length){
+        return '<p style="font-size:11px;color:var(--sub);text-align:center;padding:10px 0;margin:0">まだ回答がありません</p>';
+      }
+      var tpl = SURVEY_TEMPLATES[type] || {questions:[]};
+      var questions = Array.isArray(tpl.questions) ? tpl.questions : [];
+      var blocks = questions.map(function(q){
+        if(!q || !q.label) return '';
+        var head = '<div style="font-size:11px;font-weight:900;color:var(--ink);margin:8px 0 4px">'+escapeHtml(q.label)+'</div>';
+        if(q.type==='rating'){
+          var avg = getSurveyAverage(surveys);
+          var rated = surveys.filter(function(s){return (parseInt(getSurveyAnswer(s,q))||parseInt(s.rating)||0)>0;}).length;
+          return head+'<div style="font-size:13px;font-weight:900;color:#ffb800">★ '+(avg||'0.0')+' <span style="font-size:10px;color:var(--sub);font-weight:600">（'+rated+'件）</span></div>';
+        }
+        if(q.type==='select'||q.type==='radio'||q.type==='checkbox'){
+          var counts = {}; var totalAns = 0;
+          surveys.forEach(function(s){
+            var v = getSurveyAnswer(s,q);
+            if(Array.isArray(v)){ v.forEach(function(x){ if(x){counts[x]=(counts[x]||0)+1; totalAns++;} }); }
+            else if(v){ counts[v]=(counts[v]||0)+1; totalAns++; }
+          });
+          var keys = Object.keys(counts);
+          if(!keys.length) return head+'<p style="font-size:10px;color:var(--sub);margin:0">回答なし</p>';
+          var maxC = Math.max.apply(null, keys.map(function(k){return counts[k];}));
+          var bars = keys.sort(function(a,b){return counts[b]-counts[a];}).map(function(k){
+            var c = counts[k];
+            var pct = maxC ? Math.round(c/maxC*100) : 0;
+            return '<div style="display:flex;align-items:center;gap:6px;margin:2px 0">'+
+              '<span style="font-size:10px;color:var(--ink);min-width:78px;max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(String(k))+'</span>'+
+              '<span style="flex:1;height:8px;background:#eee;border-radius:6px;overflow:hidden"><span style="display:block;height:100%;width:'+pct+'%;background:'+color+'"></span></span>'+
+              '<span style="font-size:10px;font-weight:900;color:var(--sub);min-width:30px;text-align:right">'+c+'件</span>'+
+            '</div>';
+          }).join('');
+          return head+bars;
+        }
+        // text / textarea: 記述件数＋最新の声を数件
+        var texts = surveys.map(function(s){var v=getSurveyAnswer(s,q);return Array.isArray(v)?v.join('、'):(v||'');}).filter(function(t){return String(t).trim();});
+        if(!texts.length) return head+'<p style="font-size:10px;color:var(--sub);margin:0">記述なし</p>';
+        var preview = texts.slice(0,3).map(function(t){return '<div style="font-size:10px;color:var(--sub);background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 7px;margin:3px 0;line-height:1.5">'+escapeHtml(String(t))+'</div>';}).join('');
+        var more = texts.length>3 ? '<p style="font-size:9px;color:var(--sub);margin:2px 0 0">ほか'+(texts.length-3)+'件（「結果を見る」で全件）</p>' : '';
+        return head+'<div style="font-size:10px;color:var(--sub);margin-bottom:2px">'+texts.length+'件の記述</div>'+preview+more;
+      }).join('');
+      return blocks || '<p style="font-size:11px;color:var(--sub);margin:0">集計対象の質問がありません</p>';
+    }
+    // ===== アンケート Supabase 連携（多端末・来場者QR回答の集約）=====
+    function resolveSurveyEventUuid(eventId){
+      if(!eventId) return null;
+      var ev = (EVENTS||[]).find(function(e){return e.id===eventId || e.supabaseId===eventId;});
+      if(ev && ev.supabaseId) return ev.supabaseId;
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(eventId) ? eventId : null;
+    }
+    function saveSurveyToSupabase(s){
+      var sb = getSupabaseClient();
+      if(!sb) return Promise.resolve(null);
+      return sb.from('surveys').insert({
+        event_id: resolveSurveyEventUuid(s.eventId),
+        kind: s.type || null,
+        respondent_email: null,
+        answers: s
+      }).select('id').single().then(function(r){
+        if(r && r.error){ console.warn('Supabase survey insert failed', r.error); return null; }
+        return r && r.data ? r.data.id : null;
+      });
+    }
+    function loadSurveysFromSupabase(){
+      var sb = getSupabaseClient();
+      if(!sb) return Promise.resolve(false);
+      return sb.from('surveys').select('id,event_id,kind,answers,created_at').order('created_at',{ascending:false}).then(function(r){
+        if(r && r.error){ console.warn('Supabase survey load failed', r.error); return false; }
+        (r.data||[]).forEach(function(row){
+          var obj = (row.answers && typeof row.answers==='object') ? Object.assign({}, row.answers) : {};
+          obj.id = row.id;
+          obj.source = 'supabase';
+          if(!obj.type && row.kind) obj.type = row.kind;
+          if(typeof upsertById==='function') upsertById(SURVEYS, obj);
+          else if(!SURVEYS.some(function(x){return x.id===obj.id;})) SURVEYS.push(obj);
+        });
+        if(typeof renderAdminSurveys==='function') renderAdminSurveys();
+        return true;
+      });
+    }
 
     function surveyFieldId(q){
       return 'sv-field-' + String(q.id||'').replace(/[^a-zA-Z0-9_-]/g,'-');
@@ -6843,6 +6946,7 @@ mikke.ruu2025@gmail.com`;
         comment:collected.answers.comment || ''
       };
       SURVEYS.push(s);
+      saveSurveyToSupabase(s).then(function(sid){ if(sid){ s.id=sid; s.source='supabase'; } }); // Supabaseに集約（多端末同期）
       window.__svRatings = {};
       markStateDirty();
       saveAppState();
@@ -6882,6 +6986,7 @@ mikke.ruu2025@gmail.com`;
         comment:answers.comment || ''
       };
       SURVEYS.push(s);
+      saveSurveyToSupabase(s).then(function(sid){ if(sid){ s.id=sid; s.source='supabase'; } }); // Supabaseに集約（多端末同期）
       window.__svRatings = {};
       markStateDirty();
       saveAppState();
@@ -7026,7 +7131,11 @@ mikke.ruu2025@gmail.com`;
           '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">'+
             '<button onclick="openSurveyEditor(\''+type+'\')" style="padding:9px;border-radius:10px;background:#fff;border:1px solid '+border+';color:'+color+';font-weight:900;font-size:12px;cursor:pointer">質問を編集</button>'+
             '<button onclick="openSurveyPreview(\''+surveyUrl+'\')" style="padding:9px;border-radius:10px;background:#fff;border:1px solid '+border+';color:'+color+';font-weight:900;font-size:12px;cursor:pointer">プレビュー</button>'+
-            '<button onclick="openSurveyResultsSheet(\''+evId+'\')" style="padding:9px;border-radius:10px;background:'+color+';border:none;color:#fff;font-weight:900;font-size:12px;cursor:pointer">結果を見る</button>'+
+            '<button onclick="openSurveyResultsSheet(\''+evId+'\')" style="padding:9px;border-radius:10px;background:'+color+';border:none;color:#fff;font-weight:900;font-size:12px;cursor:pointer">全件を見る</button>'+
+          '</div>'+
+          '<div style="margin-top:12px;background:#fff;border:1px solid '+border+';border-radius:12px;padding:11px 12px">'+
+            '<div style="font-size:12px;font-weight:900;color:'+color+';margin-bottom:2px">📊 集計（'+surveys.length+'件）'+(type==='visitor'?' ／ '+selectedDateLabel:'')+'</div>'+
+            renderSurveyAggregateInline(type, surveys, color)+
           '</div>'+
         '</div>';
       }).join('');
@@ -11940,7 +12049,8 @@ mikke.ruu2025@gmail.com`,
         .then(function(){return loadCurrentUserNoticesFromSupabase({silent:true});})
         .then(function(){return loadAdminApplicationsFromSupabase({silent:true});})
         .then(function(){return loadAdminMailLogsFromSupabase({silent:true});})
-        .then(function(){return loadAlbumsFromSupabase();});
+        .then(function(){return loadAlbumsFromSupabase();})
+        .then(function(){return loadSurveysFromSupabase();});
     });
     // 即実行も保険で
     setTimeout(renderAll, 100);
