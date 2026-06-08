@@ -8424,6 +8424,26 @@ mikke.ruu2025@gmail.com`,
       card.dataset.search = (newName+' '+v('ae-kana')+' '+(isEventApp?'':getAppField(card,'屋号'))+' '+newMail).toLowerCase();
       injectFeePlanInfo(); // プラン表示も更新
       syncApplicationsFromCards();
+      // Supabase UPDATE（手動登録・行IDが存在する場合）
+      var _supabaseRowId = card.dataset.supabaseid;
+      if(_supabaseRowId){
+        var _sbUp = getSupabaseClient();
+        if(_sbUp){
+          var _catMapUp = {'物販':'retail','飲食':'food','セッション':'session','施術':'treatment'};
+          var _upd = {person_name:newName, kana:v('ae-kana'), email:newMail, admin_memo:v('ae-admin-request')||null};
+          if(isEventApp){
+            _upd.attendee_count = parseInt(v('ae-attendee-count'),10)||1;
+          }else{
+            _upd.shop_name = v('ae-shop');
+            _upd.category = _catMapUp[v('ae-cat')]||card.dataset.category||null;
+            _upd.content = v('ae-content')||null;
+            _upd.appeal = v('ae-comment')||null;
+            _upd.uword_id = v('ae-uwid')||null;
+          }
+          _sbUp.from('applications').update(_upd).eq('id',_supabaseRowId)
+            .then(function(r){ if(r&&r.error) console.warn('Supabase update failed',r.error); });
+        }
+      }
       syncMypageProfileFromLatestApplication();
       renderMypageEventCards();
       renderExhibitorsPage();
@@ -8475,6 +8495,7 @@ mikke.ruu2025@gmail.com`,
       if(!card) return;
       var name = (card.querySelector('h4')||{textContent:''}).textContent.replace(/新規|出店確定|保留/g,'').trim();
       if(!confirm('「'+name+'」の申込を削除しますか？この操作は取り消せません。')) return;
+      var _delSupabaseId = card.dataset.supabaseid;
       card.style.transition = '.2s';
       card.style.opacity = '0';
       card.style.transform = 'translateX(-30px)';
@@ -8488,6 +8509,12 @@ mikke.ruu2025@gmail.com`,
         // ダッシュボードのカテゴリー・件数・売上を再集計
         var dashEv = typeof getCurrentDashboardEvent==='function' ? getCurrentDashboardEvent() : null;
         if(dashEv && typeof applyEventData==='function') applyEventData(dashEv.key);
+        // Supabase DELETE（行IDが存在する場合）
+        if(_delSupabaseId){
+          var _sbDel = getSupabaseClient();
+          if(_sbDel) _sbDel.from('applications').delete().eq('id',_delSupabaseId)
+            .then(function(r){ if(r&&r.error) console.warn('Supabase delete failed',r.error); });
+        }
         showToast('「'+name+'」を削除しました','warn');
       }, 220);
     }
