@@ -2305,6 +2305,11 @@
     function mapSupabaseApplicationRow(row){
       var ev = (EVENTS||[]).find(function(item){return item.supabaseId===row.event_id || item.id===row.event_id;});
       var isEv = ev ? isParticipantOnlyEvent(ev) : row.category==='event';
+      var ans = row.answers || {};
+      // 手動登録など admin_memo に「アチーバー名：○○」が入っている古いデータのフォールバック
+      var achieverFromMemo = '';
+      var mAch = String(row.admin_memo||'').match(/アチーバー名[：:]\s*(.+)/);
+      if(mAch) achieverFromMemo = (mAch[1]||'').trim();
       return {
         id: row.id,
         supabaseId: row.id,
@@ -2316,23 +2321,23 @@
         eyecatch: row.eyecatch_image_url ? '1' : '0',
         eyecatchImage: row.eyecatch_image_url || '',
         category: row.category || (isEv ? 'event' : ''),
-        party: 'tbd',
-        first: 'first',
+        party: ans.party || 'tbd',
+        first: ans.first || 'first',
         personname: row.person_name || '',
         shopname: row.shop_name || row.person_name || '',
-        feeplan: isEv ? 'event-fee' : '',
+        feeplan: isEv ? 'event-fee' : (ans.feePlanId || ''),
         email: row.email || '',
         kana: row.kana || '',
-        member: '',
-        uwid: row.uword_id || '',
-        achiever: '',
-        social: row.instagram || '',
-        content: row.content || '',
-        attendeeCount: row.attendee_count || 1,
-        comment: row.appeal || '',
-        adminRequest: row.admin_memo || '',
+        member: ans.member || '',
+        uwid: row.uword_id || ans.uwid || '',
+        achiever: ans.achiever || achieverFromMemo || '',
+        social: row.instagram || ans.social || '',
+        content: row.content || ans.content || '',
+        attendeeCount: row.attendee_count || ans.attendeeCount || 1,
+        comment: row.appeal || ans.comment || '',
+        adminRequest: row.admin_memo || ans.adminRequest || '',
         createdAt: datePartFromIso(row.created_at),
-        answers: row.answers || {},
+        answers: ans,
         source: 'supabase'
       };
     }
@@ -2965,6 +2970,7 @@
       if(typeof saveAppState==='function') saveAppState();
       var sb = typeof getSupabaseClient==='function' ? getSupabaseClient() : null;
       if(sb && supabaseEventId){
+        var feeOptObj = (targetEv.feeOptions||[]).find(function(o){return o.id===fee;});
         var res = await sb.from('applications').insert({
           event_id: supabaseEventId,
           email: placeholderEmail,
@@ -2973,8 +2979,20 @@
           category: category,
           content: content||null,
           uword_id: uwidVal||null,
-          admin_memo: (achieverVal ? 'アチーバー名：'+achieverVal : null)||(memo||null),
+          admin_memo: memo||null,
           status: 'confirmed',
+          answers: {
+            first: 'first',
+            member: '',
+            uwid: uwidVal||'',
+            achiever: achieverVal||'',
+            feePlanId: isEvent ? 'event-fee' : (fee||''),
+            feePlanLabel: feeOptObj ? (feeOptObj.label||'') : '',
+            feeYen: feeOptObj ? (feeOptObj.yen||0) : 0,
+            party: 'tbd',
+            content: content||'',
+            adminRequest: memo||''
+          }
         });
         if(res.error){
           showToast('Supabase保存エラー：'+res.error.message,'warn');
@@ -8718,15 +8736,37 @@ mikke.ruu2025@gmail.com`,
         if(_sbUp){
           var _catMapUp = {'物販':'retail','飲食':'food','セッション':'session','施術':'treatment'};
           var _upd = {person_name:newName, kana:v('ae-kana'), email:newMail, admin_memo:v('ae-admin-request')||null};
+          // 既存 answers をマージ元として取得（フォームに無い項目を失わないため）
+          var _existApp = (APPLICATIONS||[]).find(function(a){return a.supabaseId===_supabaseRowId || a.id===appId;});
+          var _ans = (_existApp && _existApp.answers) ? Object.assign({}, _existApp.answers) : {};
           if(isEventApp){
             _upd.attendee_count = parseInt(v('ae-attendee-count'),10)||1;
+            _ans.attendeeCount = _upd.attendee_count;
           }else{
             _upd.shop_name = v('ae-shop');
             _upd.category = _catMapUp[v('ae-cat')]||card.dataset.category||null;
             _upd.content = v('ae-content')||null;
             _upd.appeal = v('ae-comment')||null;
             _upd.uword_id = v('ae-uwid')||null;
+            // answers にも反映（リロード後も保持されるように）
+            _ans.member = v('ae-member');
+            _ans.uwid = v('ae-uwid');
+            _ans.achiever = v('ae-achiever');
+            _ans.content = v('ae-content');
+            _ans.comment = v('ae-comment');
+            _ans.party = card.dataset.party || _ans.party || 'tbd';
+            var _feeId = (document.getElementById('ae-feeplan')||{value:''}).value;
+            if(_feeId){
+              _ans.feePlanId = _feeId;
+              var _fo = ((ev&&ev.feeOptions)||[]).find(function(o){return o.id===_feeId;});
+              if(_fo){ _ans.feePlanLabel=_fo.label||''; _ans.feeYen=_fo.yen||0; }
+            }
+            // アイキャッチも直接UPDATEで保存（RPC未デプロイでも消えないように）
+            if(typeof card.dataset.eyecatchsrc === 'string'){
+              _upd.eyecatch_image_url = card.dataset.eyecatchsrc || null;
+            }
           }
+          _upd.answers = _ans;
           _sbUp.from('applications').update(_upd).eq('id',_supabaseRowId)
             .then(function(r){ if(r&&r.error) console.warn('Supabase update failed',r.error); });
         }
