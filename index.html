@@ -2689,6 +2689,11 @@
         await refreshSupabaseAdminRole();
         if(CURRENT_USER_ROLE === 'admin'){
           var el=document.getElementById('admin-login-pwd'); if(el) el.value='';
+          // 管理者ログイン時にマイページのユーザー状態を完全クリア
+          APPLICATIONS = [];
+          CURRENT_USER_EVENTS = {};
+          NOTICES = (NOTICES||[]).filter(function(n){ return n.channel !== 'individual'; });
+          if(typeof renderMypageEventCards==='function') renderMypageEventCards();
           renderAdminLoginState();
           loadPublicEventsFromSupabase();
           if(typeof loadAdminApplicationsFromSupabase==='function') loadAdminApplicationsFromSupabase({silent:true});
@@ -4135,8 +4140,8 @@
       return !(app.category==='event' || isParticipantOnlyEvent(event));
     }
     function getMypageAccessMode(userApps){
+      if(CURRENT_USER_ROLE==='admin') return 'admin-empty'; // 管理者は常に admin-empty（mypage 表示なし）
       var apps = Array.isArray(userApps) ? userApps : getCurrentUserApplications();
-      if(CURRENT_USER_ROLE==='admin' && apps.length===0) return 'admin-empty';
       if(apps.some(isBazaarApplication)) return 'bazaar';
       if(apps.length>0) return 'event';
       return 'empty';
@@ -4158,7 +4163,7 @@
         var el = document.getElementById(elId); if(el) el.style.display = showFull ? '' : 'none';
       });
       var logoutRow = document.getElementById('mypage-logout-row');
-      if(logoutRow) logoutRow.style.display = isLoggedIn ? '' : 'none';
+      if(logoutRow) logoutRow.style.display = (isLoggedIn && CURRENT_USER_ROLE !== 'admin') ? '' : 'none';
       var saveTip = document.getElementById('mypage-save-tip-btn');
       if(saveTip) saveTip.style.display = showFull ? '' : 'none';
       var evEmpty = document.getElementById('mypage-event-empty');
