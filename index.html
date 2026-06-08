@@ -2916,7 +2916,7 @@
       var ev = (EVENTS||[]).find(function(e){return e.id===sel.value;});
       var feeOpts = (ev && ev.feeOptions) ? ev.feeOptions : [];
       feeSel.innerHTML = feeOpts.length>0
-        ? feeOpts.map(function(f){ return '<option value="'+h(f.label)+'">'+h(f.label)+'（¥'+(f.yen||0).toLocaleString()+'）</option>'; }).join('')
+        ? feeOpts.map(function(f){ return '<option value="'+h(f.id||f.label)+'">'+h(f.label)+'（¥'+(f.yen||0).toLocaleString()+'）</option>'; }).join('')
         : '<option value="">（区分なし）</option>';
     }
     async function submitManualExhibitor(kind){
@@ -2949,7 +2949,7 @@
         party:'tbd', first:'first',
         personname: name || shop,
         shopname: isEvent ? (name||'') : (shop || name || ''),
-        feeplan: isEvent ? 'event-fee' : '',
+        feeplan: isEvent ? 'event-fee' : fee,
         email: placeholderEmail,
         kana:'', member:'', uwid:uwidVal||'', achiever:achieverVal||'', social:'',
         content: content,
@@ -7963,33 +7963,12 @@ mikke.ruu2025@gmail.com`,
       if(partyEl) partyEl.textContent = '¥'+partyTotal.toLocaleString();
     }
 
-    // ダッシュボードから現在選択中のイベント詳細を開く
+    // ダッシュボードから現在選択中のイベント詳細を開く（編集シートで直接表示）
     function openSelectedEventInList(){
       var ev = getCurrentDashboardEvent();
       if(!ev || !ev.key){showToast('対象バザールがありません','warn');return;}
-      // 申込パネル等が開いていたら閉じる
       closeAdminPanel();
-      setTimeout(function(){
-        // イベント一覧パネルを開く
-        var panel = document.getElementById('admin-event-list');
-        if(panel && !panel.classList.contains('open')){
-          toggleAdminPanel('admin-event-list');
-        }
-        // 該当イベントカードを展開＋スクロール
-        setTimeout(function(){
-          var card = document.getElementById('ev-'+ev.key);
-          if(card){
-            // 他のカードは閉じる
-            document.querySelectorAll('.ev-card.open').forEach(function(c){if(c!==card) c.classList.remove('open')});
-            card.classList.add('open');
-            card.scrollIntoView({behavior:'smooth', block:'start'});
-            // ハイライト
-            card.style.transition='box-shadow .3s';
-            card.style.boxShadow='0 0 0 3px var(--ruu)';
-            setTimeout(function(){card.style.boxShadow=''}, 1200);
-          }
-        }, 150);
-      }, 100);
+      if(typeof openEventEditSheet==='function') openEventEditSheet(ev.key);
     }
     function openEventInListById(eventId){
       if(!eventId){showToast('対象イベントがありません','warn');return;}
@@ -8222,13 +8201,16 @@ mikke.ruu2025@gmail.com`,
         var current = forceEventId || sel.value;
         var bazaarEvents = (EVENTS||[]).filter(function(e){
           if(e.kind && e.kind!=='バザール') return false;
+          if(e.status === 'draft') return false;
           var hasName = !!String(e.name||'').trim();
           var hasDate = !!normalizeDateInput(e.date);
           return hasName || hasDate;
         });
-        // EVENTSからoptionを動的生成
+        // EVENTSからoptionを動的生成（直近が先頭・過去は末尾）
+        var sortAsc = function(a,b){return compareEventDateAsc(a,b);};
         sel.innerHTML = bazaarEvents.filter(function(e){return getEventEffectiveStatus(e)!=='past'})
-          .concat(bazaarEvents.filter(function(e){return getEventEffectiveStatus(e)==='past'}))
+          .sort(sortAsc)
+          .concat(bazaarEvents.filter(function(e){return getEventEffectiveStatus(e)==='past'}).sort(sortAsc))
           .map(function(e){
             var iso = normalizeDateInput(e.date);
             var dt = iso ? formatEvDateShort({date:iso, dayOfWeek:(e.dayOfWeek||computeDayOfWeek(iso)||'')}) : '日付未設定';
