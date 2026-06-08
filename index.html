@@ -6740,6 +6740,102 @@
         return true;
       });
     }
+    // ===== FAQ / テンプレート / サイト設定 / アンケート設問 Supabase連携（多端末同期）=====
+    function _sbUuid(v){ return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v||''); }
+    // --- FAQ ---
+    function saveFaqToSupabase(f){
+      var sb=getSupabaseClient(); if(!sb||!f) return;
+      var payload={question:f.q||'', answer:f.a||'', extra:{cat:f.cat||'other'}};
+      if(_sbUuid(f.id)){
+        sb.from('faqs').update(payload).eq('id',f.id).then(function(r){ if(r&&r.error) console.warn('Supabase faq update',r.error); });
+      }else{
+        sb.from('faqs').insert(payload).select('id').single().then(function(r){
+          if(r&&r.error){ console.warn('Supabase faq insert',r.error); return; }
+          if(r&&r.data){ f.id=r.data.id; f.source='supabase'; if(typeof renderAdminFAQs==='function')renderAdminFAQs(); if(typeof renderUserFAQs==='function')renderUserFAQs(); }
+        });
+      }
+    }
+    function deleteFaqFromSupabase(id){ var sb=getSupabaseClient(); if(sb&&_sbUuid(id)) sb.from('faqs').delete().eq('id',id).then(function(r){ if(r&&r.error) console.warn('Supabase faq delete',r.error); }); }
+    function loadFaqsFromSupabase(){
+      var sb=getSupabaseClient(); if(!sb) return Promise.resolve(false);
+      return sb.from('faqs').select('id,question,answer,extra,sort_order,created_at').order('created_at',{ascending:true}).then(function(r){
+        if(r&&r.error){ console.warn('Supabase faq load',r.error); return false; }
+        var rows=r.data||[];
+        if(rows.length){
+          FAQS = rows.map(function(row){ return {id:row.id, cat:(row.extra&&row.extra.cat)||'other', q:row.question||'', a:row.answer||'', source:'supabase'}; });
+        } else if(CURRENT_USER_ROLE==='admin' && FAQS.length){
+          var seed = FAQS.map(function(f){ return {question:f.q||'', answer:f.a||'', extra:{cat:f.cat||'other'}}; });
+          sb.from('faqs').insert(seed).then(function(){ loadFaqsFromSupabase(); });
+          return true;
+        }
+        if(typeof renderAdminFAQs==='function')renderAdminFAQs();
+        if(typeof renderUserFAQs==='function')renderUserFAQs();
+        return true;
+      });
+    }
+    // --- テンプレート ---
+    function saveTplToSupabase(t){
+      var sb=getSupabaseClient(); if(!sb||!t) return;
+      var payload={category:t.cat||'other', name:t.title||'', body:t.body||'', data:{image:t.image||''}};
+      if(_sbUuid(t.id)){
+        sb.from('templates').update(payload).eq('id',t.id).then(function(r){ if(r&&r.error) console.warn('Supabase tpl update',r.error); });
+      }else{
+        sb.from('templates').insert(payload).select('id').single().then(function(r){
+          if(r&&r.error){ console.warn('Supabase tpl insert',r.error); return; }
+          if(r&&r.data){ t.id=r.data.id; t.source='supabase'; if(typeof renderAdminTemplates==='function')renderAdminTemplates(); }
+        });
+      }
+    }
+    function deleteTplFromSupabase(id){ var sb=getSupabaseClient(); if(sb&&_sbUuid(id)) sb.from('templates').delete().eq('id',id).then(function(r){ if(r&&r.error) console.warn('Supabase tpl delete',r.error); }); }
+    function loadTemplatesFromSupabase(){
+      var sb=getSupabaseClient(); if(!sb) return Promise.resolve(false);
+      return sb.from('templates').select('id,category,name,subject,body,data,created_at').order('created_at',{ascending:false}).then(function(r){
+        if(r&&r.error){ console.warn('Supabase tpl load',r.error); return false; }
+        var rows=r.data||[];
+        if(rows.length){
+          TEMPLATES = rows.map(function(row){ return {id:row.id, cat:row.category||'other', title:row.name||'', body:row.body||'', image:(row.data&&row.data.image)||'', source:'supabase'}; });
+        } else if(CURRENT_USER_ROLE==='admin' && TEMPLATES.length){
+          var seed=TEMPLATES.map(function(t){ return {category:t.cat||'other', name:t.title||'', body:t.body||'', data:{image:t.image||''}}; });
+          sb.from('templates').insert(seed).then(function(){ loadTemplatesFromSupabase(); });
+          return true;
+        }
+        if(typeof renderAdminTemplates==='function')renderAdminTemplates();
+        return true;
+      });
+    }
+    // --- サイト設定 ---
+    function saveOrgSettingsToSupabase(){
+      var sb=getSupabaseClient(); if(!sb) return;
+      sb.from('org_settings').upsert({id:1, settings:ORG_SETTINGS||{}, updated_at:new Date().toISOString()}, {onConflict:'id'}).then(function(r){ if(r&&r.error) console.warn('Supabase org_settings save',r.error); });
+    }
+    function loadOrgSettingsFromSupabase(){
+      var sb=getSupabaseClient(); if(!sb) return Promise.resolve(false);
+      return sb.from('org_settings').select('settings').eq('id',1).maybeSingle().then(function(r){
+        if(r&&r.error){ console.warn('Supabase org_settings load',r.error); return false; }
+        if(r&&r.data&&r.data.settings&&typeof r.data.settings==='object'&&Object.keys(r.data.settings).length){
+          ORG_SETTINGS = Object.assign({}, ORG_SETTINGS||{}, r.data.settings);
+          if(typeof applyOrgSettings==='function') applyOrgSettings();
+          if(typeof updateApplyTermsUI==='function') updateApplyTermsUI();
+        }
+        return true;
+      });
+    }
+    // --- アンケート設問テンプレ ---
+    function saveSurveyTemplateToSupabase(type){
+      var sb=getSupabaseClient(); if(!sb||!type) return;
+      sb.from('survey_templates').upsert({kind:type, questions:SURVEY_TEMPLATES[type]||{}, updated_at:new Date().toISOString()}, {onConflict:'kind'}).then(function(r){ if(r&&r.error) console.warn('Supabase survey_tpl save',r.error); });
+    }
+    function loadSurveyTemplatesFromSupabase(){
+      var sb=getSupabaseClient(); if(!sb) return Promise.resolve(false);
+      return sb.from('survey_templates').select('kind,questions').then(function(r){
+        if(r&&r.error){ console.warn('Supabase survey_tpl load',r.error); return false; }
+        (r.data||[]).forEach(function(row){
+          if(row.kind && row.questions && typeof row.questions==='object') SURVEY_TEMPLATES[row.kind] = row.questions;
+        });
+        if(typeof renderAdminSurveys==='function') renderAdminSurveys();
+        return true;
+      });
+    }
 
     function surveyFieldId(q){
       return 'sv-field-' + String(q.id||'').replace(/[^a-zA-Z0-9_-]/g,'-');
@@ -7259,6 +7355,7 @@ mikke.ruu2025@gmail.com`;
       tpl.questions = nextQuestions;
       markStateDirty();
       saveAppState();
+      saveSurveyTemplateToSupabase(type); // Supabase保存（多端末同期）
       showToast('アンケートの質問を保存しました','success');
       closeSheet();
     }
@@ -7407,6 +7504,7 @@ mikke.ruu2025@gmail.com`,
       ORG_SETTINGS.themeColor = get('org-theme-color') || ORG_SETTINGS.themeColor;
       applyOrgSettings();
       updateApplyTermsUI();
+      saveOrgSettingsToSupabase(); // Supabase保存（多端末同期）
       showToast('サイト設定を保存しました — 即時反映されます','success');
     }
     // 設定をサイトに適用
@@ -9644,6 +9742,7 @@ mikke.ruu2025@gmail.com`,
       if(!t) return;
       var copy = {id:'tpl-'+Date.now().toString(36), cat:t.cat, title:t.title+'（コピー）', body:t.body, image:t.image||''};
       TEMPLATES.unshift(copy);
+      saveTplToSupabase(copy); // Supabase保存（多端末同期）
       renderAdminTemplates();
       showToast('複製しました — 編集してください','success');
       setTimeout(function(){openTplEditSheet(copy.id)}, 300);
@@ -9652,6 +9751,7 @@ mikke.ruu2025@gmail.com`,
       var t = TEMPLATES.find(function(x){return x.id===id});
       if(!t) return;
       if(!confirm('「'+t.title+'」を削除しますか？')) return;
+      deleteTplFromSupabase(id); // Supabaseからも削除（多端末同期）
       TEMPLATES = TEMPLATES.filter(function(x){return x.id!==id});
       renderAdminTemplates();
       showToast('削除しました','warn');
@@ -9768,11 +9868,15 @@ mikke.ruu2025@gmail.com`,
       var cat = (document.getElementById('te-cat')||{value:'other'}).value;
       var image = window.__editTplImage || '';
       if(!title || !body){showToast('タイトルと本文を入力してください','warn');return}
+      var tplObj;
       if(isNew){
-        TEMPLATES.unshift({id:id, cat:cat, title:title, body:body, image:image});
+        tplObj = {id:id, cat:cat, title:title, body:body, image:image};
+        TEMPLATES.unshift(tplObj);
       } else {
         t.title = title; t.body = body; t.cat = cat; t.image = image;
+        tplObj = t;
       }
+      saveTplToSupabase(tplObj); // Supabase保存（多端末同期）
       window.__editTplImage = '';
       renderAdminTemplates();
       showToast(isNew?'追加しました':'保存しました','success');
@@ -9874,6 +9978,7 @@ mikke.ruu2025@gmail.com`,
       if(!q || !a){showToast('質問と回答を入力してください','warn');return}
       var f = {id:'f-'+Date.now().toString(36), cat:cat, q:q, a:a};
       FAQS.unshift(f);
+      saveFaqToSupabase(f); // Supabase保存（多端末同期）
       document.getElementById('faq-new-q').value='';
       document.getElementById('faq-new-a').value='';
       renderAdminFAQs();
@@ -9902,6 +10007,7 @@ mikke.ruu2025@gmail.com`,
       f.cat = (document.getElementById('fe-cat')||{value:f.cat}).value;
       f.q = (document.getElementById('fe-q')||{value:f.q}).value.trim() || f.q;
       f.a = (document.getElementById('fe-a')||{value:f.a}).value.trim() || f.a;
+      saveFaqToSupabase(f); // Supabase更新（多端末同期）
       renderAdminFAQs();
       renderUserFAQs();
       showToast('FAQを保存しました','success');
@@ -9911,6 +10017,7 @@ mikke.ruu2025@gmail.com`,
       var f = FAQS.find(function(x){return x.id===id});
       if(!f) return;
       if(!confirm('「'+f.q+'」を削除しますか？')) return;
+      deleteFaqFromSupabase(id); // Supabaseからも削除（多端末同期）
       FAQS = FAQS.filter(function(x){return x.id!==id});
       renderAdminFAQs();
       renderUserFAQs();
@@ -12050,7 +12157,11 @@ mikke.ruu2025@gmail.com`,
         .then(function(){return loadAdminApplicationsFromSupabase({silent:true});})
         .then(function(){return loadAdminMailLogsFromSupabase({silent:true});})
         .then(function(){return loadAlbumsFromSupabase();})
-        .then(function(){return loadSurveysFromSupabase();});
+        .then(function(){return loadSurveysFromSupabase();})
+        .then(function(){return loadOrgSettingsFromSupabase();})
+        .then(function(){return loadSurveyTemplatesFromSupabase();})
+        .then(function(){return loadFaqsFromSupabase();})
+        .then(function(){return loadTemplatesFromSupabase();});
     });
     // 即実行も保険で
     setTimeout(renderAll, 100);
