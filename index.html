@@ -814,7 +814,7 @@
         </div>
         <button class="install-card" onclick="openInstallGuide()">
           <span class="icon-wrap"><svg class="icon"><use href="#i-home"/></svg></span>
-          <span><b>アプリをホーム画面に追加する</b><span>メールを探さず、次回からすぐ開けます</span></span>
+          <span><b>アプリをホーム画面に追加する</b><span>友だちに共有したり、ホームに追加できます</span></span>
           <svg class="icon"><use href="#i-chevron"/></svg>
         </button>
 
@@ -915,7 +915,6 @@
 
       <section id="news" class="page">
         <h1 class="page-title">お知らせ</h1>
-        <p class="helper" style="margin-top:-8px">主催者からの全体向けお知らせです。出店者・参加者向けや個人宛てのお知らせは <a href="#mypage" onclick="showPage('mypage')" style="color:var(--ruu);font-weight:900">マイページ</a> から確認できます。</p>
         <div class="list" id="news-list">
           <!-- 動的に描画 -->
           <p class="helper" style="text-align:center;padding:40px 0">読み込み中…</p>
@@ -1565,6 +1564,7 @@
               <button onclick="toggleAdminPanel('admin-survey')"><svg class="icon"><use href="#i-file"/></svg>アンケート</button>
               <button onclick="toggleAdminPanel('admin-template')"><svg class="icon"><use href="#i-file"/></svg>定型文</button>
               <button onclick="toggleAdminPanel('admin-archive-edit')"><svg class="icon"><use href="#i-camera"/></svg>アルバム</button>
+              <button onclick="toggleAdminPanel('admin-inquiries')"><svg class="icon"><use href="#i-mail"/></svg>問い合わせ</button>
               <button onclick="toggleAdminPanel('admin-mail-logs')"><svg class="icon"><use href="#i-file"/></svg>メールログ</button>
               <button onclick="toggleAdminPanel('admin-org-settings')"><svg class="icon"><use href="#i-settings"/></svg>サイト設定</button>
             </div>
@@ -1724,6 +1724,19 @@
           </div>
           <div id="admin-mail-list" class="admin-card-list"></div>
           <p class="helper" id="admin-mail-empty" style="text-align:center;padding:24px 0">メールログはありません。</p>
+        </div>
+
+        <div id="admin-inquiries" class="admin-panel">
+          <button class="admin-panel-back" onclick="closeAdminPanel(event)"><svg class="icon"><use href="#i-chevron"/></svg>戻る</button>
+          <div class="admin-panel-head">
+            <div><h3>問い合わせ</h3><p>アプリ内フォームから届いたお問い合わせ一覧です。</p></div>
+            <span class="badge" id="admin-inquiry-count">0件</span>
+          </div>
+          <div class="admin-card-actions single-btn">
+            <button onclick="loadAdminInquiriesFromSupabase({silent:false})">更新</button>
+          </div>
+          <div id="admin-inquiry-list" class="admin-card-list"></div>
+          <p class="helper" id="admin-inquiry-empty" style="text-align:center;padding:24px 0">問い合わせはありません。</p>
         </div>
 
         <div id="admin-faq" class="admin-panel">
@@ -2698,6 +2711,7 @@
           loadPublicEventsFromSupabase();
           if(typeof loadAdminApplicationsFromSupabase==='function') loadAdminApplicationsFromSupabase({silent:true});
           if(typeof loadAdminMailLogsFromSupabase==='function') loadAdminMailLogsFromSupabase({silent:true});
+          if(typeof loadAdminInquiriesFromSupabase==='function') loadAdminInquiriesFromSupabase({silent:true});
           showToast('ログインしました','success');
         } else {
           showToast('このアカウントには管理者権限がありません','warn');
@@ -4675,6 +4689,9 @@
         }
         if(id==='admin-mail-logs' && typeof loadAdminMailLogsFromSupabase==='function'){
           loadAdminMailLogsFromSupabase({silent:true});
+        }
+        if(id==='admin-inquiries' && typeof loadAdminInquiriesFromSupabase==='function'){
+          loadAdminInquiriesFromSupabase({silent:true});
         }
         if(id==='admin-survey' && typeof renderAdminSurveys==='function'){
           renderAdminSurveys();
@@ -7521,16 +7538,97 @@ mikke.ruu2025@gmail.com`,
       // テーマカラー
       if(s.themeColor) document.documentElement.style.setProperty('--ruu', s.themeColor);
     }
-    // 「無料で相談する」リンク
-    function openConsultLink(){
-      var s = ORG_SETTINGS;
-      if(s.consultType==='form'){
-        showPage('news');
-        showToast('運営にメッセージしたい場合は、お知らせページ末尾の連絡先からどうぞ');
-      } else {
-        // email デフォルト
-        window.location.href = 'mailto:' + (s.email || 'mikke.ruu2025@gmail.com') + '?subject=Mikke ruu お問い合わせ';
+    // 「無料で相談する」「運営に問い合わせる」→ アプリ内フォーム
+    function openConsultLink(){ openContactSheet(); }
+    function openContactSheet(){
+      openSheet('お問い合わせ','運営に直接メッセージできます',
+        '<p class="helper" style="margin-bottom:14px">送信内容は運営が確認します。返信希望の場合はメールアドレスをご記入ください。</p>'+
+        '<label style="display:block;font-size:11px;font-weight:900;color:var(--sub);margin-bottom:12px">お名前（任意）'+
+          '<input class="input" id="cf-name" placeholder="例：田中 花子" style="margin-top:4px">'+
+        '</label>'+
+        '<label style="display:block;font-size:11px;font-weight:900;color:var(--sub);margin-bottom:12px">メールアドレス（返信希望の場合）'+
+          '<input class="input" id="cf-email" type="email" placeholder="例：hanako@example.com" style="margin-top:4px">'+
+        '</label>'+
+        '<label style="display:block;font-size:11px;font-weight:900;color:var(--sub);margin-bottom:12px">お問い合わせ内容 <span style="color:var(--ruu)">必須</span>'+
+          '<textarea class="input" id="cf-msg" rows="5" placeholder="ご質問・ご要望など、自由にお書きください" style="margin-top:4px;resize:vertical"></textarea>'+
+        '</label>'+
+        '<button class="primary" style="width:100%;margin-top:4px" onclick="submitContactForm()">送信する</button>'
+      );
+    }
+    var __contactSubmitting = false;
+    async function submitContactForm(){
+      if(__contactSubmitting) return;
+      var name  = ((document.getElementById('cf-name')||{}).value||'').trim();
+      var email = ((document.getElementById('cf-email')||{}).value||'').trim();
+      var msg   = ((document.getElementById('cf-msg')||{}).value||'').trim();
+      if(!msg){ showToast('お問い合わせ内容を入力してください','warn'); return; }
+      var btn = document.querySelector('#sheet-body .primary');
+      if(btn){ btn.disabled=true; btn.textContent='送信中...'; }
+      __contactSubmitting = true;
+      var sb = getSupabaseClient();
+      var ok = false;
+      if(sb){
+        var res = await sb.from('inquiries').insert({ name: name, email: email, message: msg });
+        ok = !res.error;
+        if(res.error) console.warn('[contact] insert error', res.error);
       }
+      __contactSubmitting = false;
+      if(ok){
+        document.getElementById('sheet-body').innerHTML =
+          '<div style="text-align:center;padding:40px 16px">'+
+          '<div style="font-size:40px;margin-bottom:14px">✉️</div>'+
+          '<b style="font-size:17px;display:block;margin-bottom:10px">送信しました</b>'+
+          '<p class="helper">ご連絡ありがとうございます。<br>メールアドレスをご記入の場合は<br>運営からご連絡いたします。</p>'+
+          '<button class="secondary" style="margin-top:20px;width:100%;max-width:240px" onclick="closeSheet()">閉じる</button>'+
+          '</div>';
+      } else {
+        if(btn){ btn.disabled=false; btn.textContent='送信する'; }
+        showToast('送信できませんでした。しばらく経ってから再度お試しください。','warn');
+      }
+    }
+    var INQUIRIES = [];
+    async function loadAdminInquiriesFromSupabase(options){
+      var opts = (options && typeof options==='object') ? options : {};
+      var silent = !!opts.silent;
+      var sb = getSupabaseClient();
+      if(!sb){ renderAdminInquiries(); return; }
+      var res = await sb.from('inquiries').select('id,name,email,message,created_at').order('created_at',{ascending:false}).limit(100);
+      if(res.error){
+        if(!silent) showToast('問い合わせ読込失敗: '+res.error.message,'warn');
+        return;
+      }
+      INQUIRIES = res.data||[];
+      renderAdminInquiries();
+      if(!silent) showToast('問い合わせを更新しました','success');
+    }
+    function renderAdminInquiries(){
+      var list  = document.getElementById('admin-inquiry-list');
+      var empty = document.getElementById('admin-inquiry-empty');
+      var cnt   = document.getElementById('admin-inquiry-count');
+      if(!list) return;
+      if(cnt) cnt.textContent = INQUIRIES.length+'件';
+      if(!INQUIRIES.length){
+        list.innerHTML='';
+        if(empty) empty.style.display='';
+        return;
+      }
+      if(empty) empty.style.display='none';
+      list.innerHTML = INQUIRIES.map(function(q){
+        var dt = q.created_at
+          ? new Date(q.created_at).toLocaleString('ja-JP',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})
+          : '';
+        var nameRow  = q.name  ? '<span style="font-weight:900;font-size:13px">'+h(q.name)+'</span> ' : '';
+        var emailRow = q.email
+          ? '<a href="mailto:'+h(q.email)+'" style="font-size:11px;color:var(--ruu)">'+h(q.email)+'</a>'
+          : '<span style="font-size:11px;color:var(--sub)">メールなし</span>';
+        return '<div class="admin-card" style="padding:12px 14px;gap:6px">'+
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'+
+          '<div>'+nameRow+emailRow+'</div>'+
+          '<span style="font-size:11px;color:var(--sub);white-space:nowrap;flex-shrink:0">'+dt+'</span>'+
+          '</div>'+
+          '<p style="font-size:13px;line-height:1.65;margin:4px 0 0;white-space:pre-wrap;word-break:break-all">'+h(q.message)+'</p>'+
+          '</div>';
+      }).join('');
     }
     // 「サポートを見る」 → 外部の注文/サポート申込みアプリ
     function openSupportApp(){
