@@ -8896,6 +8896,54 @@ mikke.ruu2025@gmail.com`,
       document.getElementById('notice-person-wrap').style.display = (ch==='individual')?'':'none';
     }
 
+    // ===== お知らせ Supabase 連携ヘルパー（多端末同期）=====
+    function _noticeIsUuid(v){ return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v||''); }
+    function buildNoticeDbPayload(n){
+      // targetEvent(ローカルid) → Supabaseのevent_id(uuid) に変換
+      var evUuid = null;
+      if(n.channel==='event-exhibitors' && n.targetEvent){
+        var ev = (EVENTS||[]).find(function(x){return x.id===n.targetEvent || x.supabaseId===n.targetEvent;});
+        evUuid = ev && ev.supabaseId ? ev.supabaseId : (_noticeIsUuid(n.targetEvent)?n.targetEvent:null);
+      }
+      var targetUserId = (n.channel==='individual' && _noticeIsUuid(n.targetPerson)) ? n.targetPerson : null;
+      return {
+        channel: n.channel,
+        event_id: evUuid,
+        target_user_id: targetUserId,
+        target_email: n.targetEmail || null,
+        title: n.title || '',
+        body: n.body || '',
+        image_url: n.image || null
+      };
+    }
+    function saveNoticeToSupabase(n){
+      var sb = getSupabaseClient();
+      if(!sb) return Promise.resolve(null);
+      return sb.from('notices').insert(buildNoticeDbPayload(n)).select('id').single()
+        .then(function(r){
+          if(r && r.error){ console.warn('Supabase notice insert failed', r.error); showToast('Supabaseお知らせ保存エラー：'+r.error.message,'warn'); return null; }
+          return r && r.data ? r.data.id : null;
+        });
+    }
+    function updateNoticeInSupabase(n){
+      var sb = getSupabaseClient();
+      if(!sb || !_noticeIsUuid(n.id)) return Promise.resolve(false);
+      return sb.from('notices').update(buildNoticeDbPayload(n)).eq('id', n.id)
+        .then(function(r){
+          if(r && r.error){ console.warn('Supabase notice update failed', r.error); showToast('Supabaseお知らせ更新エラー：'+r.error.message,'warn'); return false; }
+          return true;
+        });
+    }
+    function deleteNoticeFromSupabase(id){
+      var sb = getSupabaseClient();
+      if(!sb || !_noticeIsUuid(id)) return Promise.resolve(false);
+      return sb.from('notices').delete().eq('id', id)
+        .then(function(r){
+          if(r && r.error){ console.warn('Supabase notice delete failed', r.error); showToast('Supabaseお知らせ削除エラー：'+r.error.message,'warn'); return false; }
+          return true;
+        });
+    }
+
     // お知らせ投稿
     function postNotice(){
       var input = collectNoticeComposerInput();
@@ -8903,14 +8951,18 @@ mikke.ruu2025@gmail.com`,
       var n = Object.assign({id:uid(), date:todayStr(), read:false, image:''}, input.data);
       applyNoticeImageAndCommit(input.file, '', function(img){
         n.image = img || '';
-        NOTICES.unshift(n);
-        clearNoticeComposerForm(true);
-        setNoticeComposerMode('new');
-        var willReach = noticeForCurrentUser(n);
-        var msg = '投稿しました' + (willReach?' — あなた（出店者）にも届きます':' — 対象の出店者に通知');
-        showToast(msg,'success');
-        markStateDirty();
-        renderAll();
+        // Supabaseに保存し、発行されたuuidをローカルidに採用
+        saveNoticeToSupabase(n).then(function(sbId){
+          if(sbId){ n.id = sbId; n.source = 'supabase'; }
+          NOTICES.unshift(n);
+          clearNoticeComposerForm(true);
+          setNoticeComposerMode('new');
+          var willReach = noticeForCurrentUser(n);
+          var msg = '投稿しました' + (willReach?' — あなた（出店者）にも届きます':' — 対象の出店者に通知');
+          showToast(msg,'success');
+          markStateDirty();
+          renderAll();
+        });
       });
     }
     function saveEditedNotice(){
@@ -8934,7 +8986,9 @@ mikke.ruu2025@gmail.com`,
         };
         if(updated.channel==='event-exhibitors') updated.targetEvent = input.data.targetEvent;
         if(updated.channel==='individual') updated.targetPerson = input.data.targetPerson;
+        updated.source = prev.source;
         NOTICES[idx] = updated;
+        updateNoticeInSupabase(updated); // Supabaseも更新（多端末同期）
         clearNoticeComposerForm(true);
         setNoticeComposerMode('new');
         showToast('保存しました','success');
@@ -8949,17 +9003,21 @@ mikke.ruu2025@gmail.com`,
       var n = Object.assign({id:uid(), date:todayStr(), read:false, image:''}, input.data);
       applyNoticeImageAndCommit(input.file, NOTICE_EDITING_IMAGE, function(img){
         n.image = img || '';
-        NOTICES.unshift(n);
-        clearNoticeComposerForm(true);
-        setNoticeComposerMode('new');
-        showToast('複製して再投稿しました','success');
-        markStateDirty();
-        renderAll();
+        saveNoticeToSupabase(n).then(function(sbId){ // 新規としてSupabaseに保存
+          if(sbId){ n.id = sbId; n.source = 'supabase'; }
+          NOTICES.unshift(n);
+          clearNoticeComposerForm(true);
+          setNoticeComposerMode('new');
+          showToast('複製して再投稿しました','success');
+          markStateDirty();
+          renderAll();
+        });
       });
     }
 
     function deleteNotice(id){
       if(!confirm('このお知らせを削除しますか？')) return;
+      deleteNoticeFromSupabase(id); // Supabaseからも削除（多端末同期）
       NOTICES = NOTICES.filter(function(x){return x.id!==id});
       showToast('削除しました');
       markStateDirty();
@@ -11372,8 +11430,15 @@ mikke.ruu2025@gmail.com`,
       var ev = EVENTS.find(function(x){return x.id===id});
       if(!ev) return;
       if(!confirm('「'+ev.name+'」を削除しますか？\n申込・お知らせは残ります（イベント情報のみ削除）。')) return;
+      var _evSbId = ev.supabaseId;
       EVENTS = EVENTS.filter(function(x){return x.id!==id});
       renderEventList();
+      // Supabase からも削除（多端末同期）
+      if(_evSbId){
+        var _sbEv = getSupabaseClient();
+        if(_sbEv) _sbEv.from('events').delete().eq('id', _evSbId)
+          .then(function(r){ if(r&&r.error){ console.warn('Supabase event delete failed', r.error); showToast('Supabaseイベント削除エラー：'+r.error.message,'warn'); } });
+      }
       showToast('「'+ev.name+'」を削除しました','warn');
     }
 
