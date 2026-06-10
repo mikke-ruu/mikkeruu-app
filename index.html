@@ -458,6 +458,13 @@
     #sheet-body label{min-width:0}
     #sheet-body div[style*="grid-template-columns"]>*{min-width:0}
     #sheet-body input[type="date"],#sheet-body input[type="time"],#sheet-body input[type="number"]{min-width:0;width:100%;box-sizing:border-box;-webkit-appearance:none;appearance:none}
+    /* 読みやすさ改善: タイムライン等の極小・薄文字を底上げ（文字サイズ設定に頼らず標準で読める大きさに） */
+    .ev-tl-step .lbl{font-size:12px!important;font-weight:900!important;color:var(--ink)!important}
+    .ev-tl-step .date{font-size:11.5px!important;font-weight:800!important;color:#6d6477!important}
+    .ev-tl-step.done .date{color:#1f9ca0!important}
+    .ev-tl-step.current .lbl,.ev-tl-step.current .date{color:var(--ruu)!important}
+    .ev-revenue-row .lbl{font-size:12px}
+    .filter-label{font-size:11.5px;color:#6d6477}
     .tpl-category-badge{display:inline-block;font-size:10.5px;font-weight:900;padding:2px 7px;border-radius:99px;background:#f3eff7;color:var(--sub);letter-spacing:.04em;margin-right:5px}
     .tpl-category-badge.recruit{background:#fff5f7;color:var(--ruu)}
     .tpl-category-badge.confirm{background:#e1f5ee;color:#3ba48a}
@@ -2593,6 +2600,7 @@
         if(res.error) throw res.error;
         return true;
       }catch(e){
+        window.__lastAlbumPhotoError = (e && e.message) || String(e);
         console.warn('saveAlbumPhotos failed:', e.message||e);
         return false;
       }
@@ -4397,7 +4405,7 @@
       if(noticeHelper){
         noticeHelper.textContent = hasBazaarApp ? '出店者向け・イベント別・あなた宛ての連絡はここに届きます。' : 'イベント別・あなた宛ての連絡はここに届きます。';
       }
-      var showGuide = mode==='empty';
+      var showGuide = mode==='empty' || mode==='admin-empty'; // admin-emptyは出店者ビュー設定フォームを表示する
       if(!guide || !title || !body || !actions) return;
       guide.classList.toggle('show', showGuide);
       if(!showGuide) return;
@@ -10701,7 +10709,7 @@ mikke.ruu2025@gmail.com`,
       }else{
         steps = [
           {label:'募集中', date:ev.deadline ? '〜'+ev.deadline.split('-').slice(1).join('/') : '〜', completeBefore:ev.deadline},
-          {label:'アイキャッチ', date:ev.eyecatchDeadline||'-', completeBefore:ev.eyecatchDeadline},
+          {label:'アイキャッチ', date:ev.eyecatchDeadline ? ev.eyecatchDeadline.split('-').slice(1).join('/') : '-', completeBefore:ev.eyecatchDeadline},
           {label:'Zoom説明会', date:ev.zoomDate ? ev.zoomDate.split('-').slice(1).join('/') : '-', completeBefore:ev.zoomDate},
           {label:'開催', date:ev.date ? ev.date.split('-').slice(1).join('/') : '-', completeBefore:ev.date}
         ];
@@ -12285,12 +12293,9 @@ mikke.ruu2025@gmail.com`,
           var path = 'albums/'+albumId+'/'+photoId+'.'+ext;
           return uploadFileToStorage(path, file).then(function(url){
             if(url) return {id:photoId, src:url, type:'image'};
-            // Storage 失敗 → data-URL フォールバック
-            return new Promise(function(resolve){
-              var fr = new FileReader();
-              fr.onload = function(e){ resolve({id:photoId, src:e.target.result||'', type:'image'}); };
-              fr.onerror = function(){ resolve({id:photoId, src:'', type:'image'}); };
-              fr.readAsDataURL(file);
+            // Storage 失敗 → 圧縮data-URLフォールバック（生データだと巨大すぎてDB保存も失敗するため）
+            return resizeImageToDataURL(file, 1200, 0.8).then(function(dataUrl){
+              return {id:photoId, src:dataUrl||'', type:'image'};
             });
           });
         }
@@ -12431,7 +12436,7 @@ mikke.ruu2025@gmail.com`,
           if(coverPhoto) updateAlbumMetaInSupabase(supabaseId, undefined, undefined, coverPhoto.src);
           return saveAlbumPhotosToSupabase(supabaseId, photos).then(function(ok){
             if(ok===false && photos.length){
-              showToast('⚠ アルバム写真のクラウド保存に失敗しました（リロードで消える可能性があります）','warn');
+              showToast('⚠ 写真のクラウド保存に失敗：'+(window.__lastAlbumPhotoError||'不明')+'（リロードで消える可能性）','warn');
             } else {
               showToast('アルバムをクラウドに保存しました（他の端末にも反映）','success');
             }
