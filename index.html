@@ -276,6 +276,11 @@
     .status-chip{min-height:32px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--sub);font-size:13px;font-weight:850;padding:0 12px;cursor:pointer}
     .status-chip.active{background:var(--ruu);color:#fff;border-color:var(--ruu)}
     .line-check-label{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:850;cursor:pointer}
+    /* 一括選択モード */
+    .exhibitor-card{position:relative}
+    .exhibitor-card .bulk-check{display:none;position:absolute;top:14px;right:46px;width:22px;height:22px;z-index:3;accent-color:var(--ruu)}
+    #admin-applications.bulk-mode .exhibitor-card .bulk-check{display:block}
+    #admin-applications.bulk-mode #bulk-action-bar{display:flex!important}
     .line-check-label input{accent-color:var(--mint);width:16px;height:16px}
     .admin-app-detail-box{padding:12px;border-radius:14px;background:#f9f6ff;border:1px solid #ece6ff}
     .admin-app-detail-box p{margin:0;font-size:13px;color:var(--sub);line-height:1.65}
@@ -448,7 +453,11 @@
     .tpl-tag-chips button{word-break:break-all}
     #te-preview{overflow-wrap:anywhere;word-break:break-all}
     #sheet-body{max-width:100%;overflow-x:hidden}
-    #sheet-body .input,#sheet-body textarea,#sheet-body select{max-width:100%;box-sizing:border-box}
+    #sheet-body .input,#sheet-body textarea,#sheet-body select{max-width:100%;box-sizing:border-box;min-width:0}
+    /* スマホのイベント作成・編集: 日付/時間入力が固有の最小幅でグリッドからはみ出し重なるのを防ぐ */
+    #sheet-body label{min-width:0}
+    #sheet-body div[style*="grid-template-columns"]>*{min-width:0}
+    #sheet-body input[type="date"],#sheet-body input[type="time"],#sheet-body input[type="number"]{min-width:0;width:100%;box-sizing:border-box;-webkit-appearance:none;appearance:none}
     .tpl-category-badge{display:inline-block;font-size:10.5px;font-weight:900;padding:2px 7px;border-radius:99px;background:#f3eff7;color:var(--sub);letter-spacing:.04em;margin-right:5px}
     .tpl-category-badge.recruit{background:#fff5f7;color:var(--ruu)}
     .tpl-category-badge.confirm{background:#e1f5ee;color:#3ba48a}
@@ -1617,6 +1626,15 @@
             <button class="filter-chip app-status-chip" data-as="hold" onclick="filterAppsByStatus(this,'hold')">保留</button>
           </div>
           <input id="apps-search" class="input" type="search" placeholder="名前・屋号・ひらがなで検索" oninput="filterAppsCombined()" style="min-height:44px">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button type="button" id="bulk-mode-btn" class="filter-chip" onclick="toggleBulkSelectMode()">☑ 一括選択</button>
+            <div id="bulk-action-bar" style="display:none;gap:6px;flex-wrap:wrap;align-items:center">
+              <button type="button" class="filter-chip" onclick="bulkSelectAllVisible(true)">全選択</button>
+              <button type="button" class="filter-chip" onclick="bulkSelectAllVisible(false)">解除</button>
+              <button type="button" class="filter-chip" style="background:var(--ruu);color:#fff;border-color:var(--ruu)" onclick="bulkConfirmSelected()">選択を確定にする</button>
+              <button type="button" class="filter-chip" style="background:#3ba48a;color:#fff;border-color:#3ba48a" onclick="bulkLineSelected()">選択をLINE済みに</button>
+            </div>
+          </div>
           <select class="input" id="apps-drop-filter" onchange="filterAppsByDrop()">
             <option value="all">絞り込み：すべて</option>
             <option value="line-pending">LINE未招待</option>
@@ -2067,6 +2085,12 @@
           CURRENT_USER_EMAIL = res.data.email || CURRENT_USER_EMAIL;
         }
       }catch(e){}
+      // 管理者が「出店者として見る」メールを設定済みなら、マイページ表示はそのメールで扱う
+      if(CURRENT_USER_ROLE==='admin'){
+        var asEmail = '';
+        try{ asEmail = localStorage.getItem('mikke_admin_mypage_email')||''; }catch(e2){}
+        if(asEmail) CURRENT_USER_EMAIL = asEmail;
+      }
       refreshCurrentUserEventsByEmail(CURRENT_USER_EMAIL);
       markStateDirty();
       saveAppState();
@@ -2610,7 +2634,8 @@
         var session = current && current.data && current.data.session;
         if(!session || !session.user || !CURRENT_USER_EMAIL) return false;
         // 未紐付け申込（user_id=null）をログイン済みユーザーに紐付け
-        if(CURRENT_USER_ID && CURRENT_USER_EMAIL){
+        // （管理者が出店者ビューで他人のメールを見ている時は紐付けない）
+        if(CURRENT_USER_ID && CURRENT_USER_EMAIL && CURRENT_USER_ROLE!=='admin'){
           try{
             await sb.from('applications')
               .update({user_id: CURRENT_USER_ID})
@@ -3363,6 +3388,29 @@
       showToast('ログアウトしました');
       showPage('home', true);
     }
+    // ===== 管理者の出店者ビュー（管理ログインはそのまま、マイページだけ出店者メールで表示） =====
+    async function adminSetMypageEmail(){
+      var input = document.getElementById('admin-mypage-email');
+      var email = input ? input.value.trim() : '';
+      if(!email){ showToast('メールアドレスを入力してください','warn'); return; }
+      try{ localStorage.setItem('mikke_admin_mypage_email', email); }catch(e){}
+      CURRENT_USER_EMAIL = email;
+      showToast('出店者ビューを読み込み中…');
+      try{ await loadCurrentUserApplicationsFromSupabase({silent:true}); }catch(e){}
+      refreshCurrentUserEventsByEmail(email);
+      syncMypageProfileFromLatestApplication();
+      renderMypageEventCards();
+      var asApps = getCurrentUserApplications();
+      if(!asApps.length){ showToast('このメールアドレスの申込は見つかりませんでした','warn'); }
+      else { showToast('出店者としてマイページを表示しています','success'); }
+    }
+    function adminClearMypageEmail(){
+      try{ localStorage.removeItem('mikke_admin_mypage_email'); }catch(e){}
+      CURRENT_USER_EMAIL = (typeof ADMIN_EMAIL!=='undefined' ? ADMIN_EMAIL : '');
+      refreshCurrentUserEventsByEmail(CURRENT_USER_EMAIL);
+      renderMypageEventCards();
+      showToast('運営アカウント表示に戻しました','success');
+    }
     async function sendMypageMagicLink(){
       var emailInput = document.getElementById('mypage-login-email');
       var email = emailInput ? emailInput.value.trim() : '';
@@ -3371,11 +3419,16 @@
       if(!sb){ showToast('ログインを利用できません','warn'); return; }
       try{
         var redirectTo = (location.origin||'')+location.pathname+'#mypage';
-        var res = await sb.auth.signInWithOtp({ email:email, options:{ emailRedirectTo:redirectTo, shouldCreateUser:false } });
+        var res = await sb.auth.signInWithOtp({ email:email, options:{ emailRedirectTo:redirectTo, shouldCreateUser:true } });
         if(res.error) throw res.error;
-        showToast('ログインリンクをメールで送りました。メールをご確認ください。');
+        showToast('ログインリンクをメールで送りました。届かない場合は迷惑メールフォルダもご確認ください。','success');
       }catch(e){
-        showToast('送信できませんでした：'+((e&&e.message)||String(e)),'warn');
+        var msg = (e&&e.message)||String(e);
+        if(/rate|seconds/i.test(msg)){
+          showToast('短時間に送信しすぎています。1分ほど待ってからもう一度お試しください。','warn');
+        }else{
+          showToast('送信できませんでした：'+msg,'warn');
+        }
       }
     }
     async function changeAdminPassword(){
@@ -4283,6 +4336,16 @@
       });
       var logoutRow = document.getElementById('mypage-logout-row');
       if(logoutRow) logoutRow.style.display = (isLoggedIn && CURRENT_USER_ROLE !== 'admin') ? '' : 'none';
+      // 管理者の出店者ビュー解除ボタン（出店者ビュー表示中のみ）
+      var adminExit = document.getElementById('admin-mypage-exit-row');
+      if(!adminExit && logoutRow && logoutRow.parentNode){
+        adminExit = document.createElement('div');
+        adminExit.id = 'admin-mypage-exit-row';
+        adminExit.style.cssText = 'margin-top:10px;display:none';
+        adminExit.innerHTML = '<button class="secondary" style="width:100%" onclick="adminClearMypageEmail()">出店者ビューを解除（運営アカウントに戻る）</button>';
+        logoutRow.parentNode.insertBefore(adminExit, logoutRow);
+      }
+      if(adminExit) adminExit.style.display = (CURRENT_USER_ROLE==='admin' && showFull) ? '' : 'none';
       var saveTip = document.getElementById('mypage-save-tip-btn');
       if(saveTip) saveTip.style.display = showFull ? '' : 'none';
       var evEmpty = document.getElementById('mypage-event-empty');
@@ -4301,8 +4364,13 @@
       if(!showGuide) return;
       if(mode==='admin-empty'){
         title.textContent = '運営アカウントでログイン中';
-        body.textContent = '申込者用の公開プロフィールは表示していません。イベント作成や申込確認は主催者ページから行えます。';
-        actions.innerHTML = "<button class=\"primary\" onclick=\"showPage('admin')\">主催者ページへ</button><button class=\"secondary\" onclick=\"showPage('events')\">公開ページを確認</button>";
+        body.textContent = '出店者としてもマイページを使う場合は、申込に使ったメールアドレスを設定してください。アイキャッチ提出やお知らせ確認が一般の出店者と同じ画面でできます。';
+        var savedAsEmail = '';
+        try{ savedAsEmail = localStorage.getItem('mikke_admin_mypage_email')||''; }catch(e){}
+        actions.style.cssText = 'display:flex;flex-direction:column;gap:8px';
+        actions.innerHTML = '<input class="input" id="admin-mypage-email" type="email" placeholder="出店者用メールアドレス" value="'+h(savedAsEmail)+'" style="width:100%;box-sizing:border-box">'
+          +'<button class="primary" onclick="adminSetMypageEmail()">このメールの申込を表示</button>'
+          +"<button class=\"secondary\" onclick=\"showPage('admin')\">主催者ページへ</button>";
       }else if(mode==='event'){
         title.textContent = 'イベント参加者マイページ';
         body.textContent = 'イベント参加のみの場合、来場者向けの出店プロフィールやアイキャッチ提出欄は表示しません。申込状況と運営からのお知らせは下に表示されます。';
@@ -4315,7 +4383,8 @@
           actions.style.cssText = 'display:flex;flex-direction:column;gap:8px';
           actions.innerHTML = '<input class="input" id="mypage-login-email" type="email" placeholder="メールアドレス" style="width:100%;box-sizing:border-box">'
             +'<button class="primary" onclick="sendMypageMagicLink()">ログインリンクを送る</button>'
-            +'<button class="secondary" style="font-size:11px" onclick="showPage(\'events\')">申込はこちら</button>';
+            +'<button class="secondary" style="font-size:11px" onclick="showPage(\'events\')">申込はこちら</button>'
+            +(/Line\//i.test(navigator.userAgent)?'<p class="helper" style="margin:2px 0 0;font-size:11px">※ LINEのブラウザで開いています。メールのログインリンクは別のブラウザで開くため、ログイン後はそちらをブックマーク／ホーム画面追加すると便利です。</p>':'');
         }else{
           title.textContent = 'まだ申込はありません';
           body.textContent = 'イベントやバザールに申込すると、このページに申込状況・確定連絡・運営からのお知らせが表示されます。';
@@ -4513,6 +4582,7 @@
           '</div>';
       return ''+
       '<article class="exhibitor-card" id="'+h(app.id)+'" data-source="'+h(app.source||'local')+'" data-supabaseid="'+h(app.supabaseId||'')+'" data-event="'+h(app.event)+'" data-status="'+h(app.status)+'" data-line="'+h(app.line)+'" data-eyecatch="'+h(app.eyecatch)+'" data-eyecatchsrc="'+h(app.eyecatchImage||'')+'" data-category="'+h(app.category)+'" data-kind="'+(isEventApp?'event':'bazaar')+'" data-party="'+h(app.party)+'" data-search="'+h((app.personname||'')+' '+(app.kana||'')+' '+(app.shopname||'')+' '+(app.email||'')).toLowerCase()+'" data-person="'+h(app.person)+'" data-personname="'+h(app.personname)+'" data-shopname="'+h(app.shopname)+'" data-feeplan="'+h(app.feeplan)+'" data-email="'+h(app.email)+'" data-adminrequest="'+h(app.adminRequest||'')+'" data-attendeecount="'+h(String(attendeeCount))+'">'+
+        '<input type="checkbox" class="bulk-check" onclick="event.stopPropagation()" aria-label="一括選択">'+
         (isEventApp ?
         '<button class="exhibitor-card-header" type="button" style="grid-template-columns:1fr 22px;padding:14px 16px;align-items:start" onclick="toggleAppCard(\''+h(app.id)+'\')">'+
           '<div>'+
@@ -4540,6 +4610,8 @@
             '<button class="status-chip'+(app.status==='new'?' active':'')+'" onclick="setAppStatus(\''+h(app.id)+'\',\'new\',this)">新規</button>'+
             '<button class="status-chip'+(app.status==='confirmed'?' active':'')+'" onclick="setAppStatus(\''+h(app.id)+'\',\'confirmed\',this)">'+(isEventApp?'参加確定':'出店確定')+'</button>'+
             '<button class="status-chip'+(app.status==='hold'?' active':'')+'" onclick="setAppStatus(\''+h(app.id)+'\',\'hold\',this)">保留</button>'+
+            (isEventApp ? '' : '<button class="status-chip line-quick'+(lineDone?' active':'')+'" style="'+(lineDone?'background:#3ba48a;border-color:#3ba48a':'')+'" onclick="quickToggleLine(\''+h(app.id)+'\',this)">LINE済み</button>')+
+            '<button class="status-chip" style="margin-left:auto" onclick="event.stopPropagation();openAppEditSheet(\''+h(app.id)+'\')">✎ 編集</button>'+
           '</div>'+
           '<div class="app-section">'+
             '<p class="app-section-title">基本情報</p>'+
@@ -4562,12 +4634,25 @@
       '</article>';
     }
     function syncApplicationsFromCards(){
+      // 重要: answers(jsonb) や user_id はカードDOMに無いため、既存レコードから引き継ぐ。
+      // これを怠ると編集保存のたびに answers（出店料金額など）が消えるバグになる。
+      var prevById = {};
+      (APPLICATIONS||[]).forEach(function(a){
+        if(!a) return;
+        if(a.id) prevById[a.id] = a;
+        if(a.supabaseId) prevById[a.supabaseId] = a;
+      });
       APPLICATIONS = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card')).map(function(card){
+        var prev = prevById[card.id] || prevById[card.dataset.supabaseid||''] || {};
         return {
           id: card.id || ('app-'+Date.now().toString(36)),
           source: card.dataset.source || 'local',
           supabaseId: card.dataset.supabaseid || '',
-          person: card.dataset.person || '',
+          person: card.dataset.person || prev.person || '',
+          user_id: prev.user_id || '',
+          answers: prev.answers || {},
+          first: prev.first || 'first',
+          social: prev.social || '',
           event: card.dataset.event || '',
           status: card.dataset.status || 'new',
           line: card.dataset.line || '0',
@@ -4577,7 +4662,7 @@
           party: card.dataset.party || 'tbd',
           personname: card.dataset.personname || '',
           shopname: card.dataset.shopname || '',
-          feeplan: card.dataset.feeplan || '',
+          feeplan: card.dataset.feeplan || prev.feeplan || '',
           email: card.dataset.email || '',
           kana: getAppField(card,'ふりがな'),
           member: getAppField(card,'会員区分').indexOf('UW')!==-1 ? 'uw' : 'non',
@@ -5401,6 +5486,73 @@
         showToast('Supabase更新エラー：' + ((e&&e.message)||'権限または対象行を確認してください'), 'warn');
         renderApplications();
         return false;
+      }
+    }
+    // ===== 一括選択モード（出店確定・LINE済みの一括登録） =====
+    function toggleBulkSelectMode(){
+      var panel = document.getElementById('admin-applications');
+      var btn = document.getElementById('bulk-mode-btn');
+      if(!panel) return;
+      var on = !panel.classList.contains('bulk-mode');
+      panel.classList.toggle('bulk-mode', on);
+      if(btn) btn.classList.toggle('active', on);
+      if(!on) bulkSelectAllVisible(false);
+    }
+    function getBulkSelectedCards(){
+      return Array.from(document.querySelectorAll('#admin-applications .exhibitor-card'))
+        .filter(function(c){
+          if(c.style.display==='none') return false;
+          var cb = c.querySelector('.bulk-check');
+          return cb && cb.checked;
+        });
+    }
+    function bulkSelectAllVisible(state){
+      document.querySelectorAll('#admin-applications .exhibitor-card').forEach(function(c){
+        var cb = c.querySelector('.bulk-check');
+        if(!cb) return;
+        cb.checked = state && c.style.display!=='none';
+      });
+    }
+    async function bulkConfirmSelected(){
+      var cards = getBulkSelectedCards();
+      if(!cards.length){ showToast('カードを選択してください（カード右上のチェック）','warn'); return; }
+      if(!confirm(cards.length+'件をまとめて確定にします。確定メール・お知らせも各申込者に送られます。よろしいですか？')) return;
+      showToast('一括確定中…（'+cards.length+'件）');
+      var done=0, skip=0;
+      for(var i=0;i<cards.length;i++){
+        var c = cards[i];
+        if(c.dataset.status==='confirmed'){ skip++; continue; }
+        try{ await setAppStatus(c.id, 'confirmed', null); done++; }catch(e){}
+      }
+      showToast('一括確定が完了しました（更新 '+done+'件'+(skip?'・確定済み '+skip+'件':'')+'）','success');
+    }
+    async function bulkLineSelected(){
+      var cards = getBulkSelectedCards();
+      if(!cards.length){ showToast('カードを選択してください（カード右上のチェック）','warn'); return; }
+      var done=0;
+      cards.forEach(function(c){
+        if(c.dataset.line==='1') return;
+        var cb = c.querySelector('input[type="checkbox"][onchange*="toggleAppLine"]');
+        if(cb) cb.checked = true;
+        toggleAppLine(c.id, {checked:true});
+        var chip = c.querySelector('.line-quick');
+        if(chip){ chip.classList.add('active'); chip.style.background='#3ba48a'; chip.style.borderColor='#3ba48a'; }
+        done++;
+      });
+      showToast('LINE済みに更新しました（'+done+'件）','success');
+    }
+    // ステータスチップ並びの「LINE済み」クイックトグル（当日準備のチェックボックスと同期）
+    function quickToggleLine(id, btn){
+      var card=document.getElementById(id);
+      if(!card) return;
+      var next = card.dataset.line!=='1';
+      var cb = card.querySelector('input[type="checkbox"][onchange*="toggleAppLine"]');
+      if(cb) cb.checked = next;
+      toggleAppLine(id, {checked: next});
+      if(btn){
+        btn.classList.toggle('active', next);
+        btn.style.background = next ? '#3ba48a' : '';
+        btn.style.borderColor = next ? '#3ba48a' : '';
       }
     }
     function toggleAppLine(id,checkbox){
@@ -7999,7 +8151,14 @@ mikke.ruu2025@gmail.com`,
         var targetEvObj = targetEvId ? (EVENTS||[]).find(function(e){return e.id===targetEvId;}) : null;
         if(!targetEvObj && targetApp) targetEvObj = (EVENTS||[]).find(function(e){return e.id===targetApp.event;});
         var evSupabaseId = targetEvObj ? targetEvObj.supabaseId : null;
-        await updateMyEyecatchInSupabase(imageUrl, evSupabaseId||undefined);
+        var eyeRpcOk = await updateMyEyecatchInSupabase(imageUrl, evSupabaseId||undefined);
+        // 管理者の出店者ビューから提出した場合はRPC（自分の申込限定）が効かないため直接UPDATE
+        if(!eyeRpcOk && CURRENT_USER_ROLE==='admin' && targetApp && targetApp.supabaseId){
+          try{
+            var eyeUpd = await sb.from('applications').update({eyecatch_image_url: imageUrl}).eq('id', targetApp.supabaseId);
+            if(eyeUpd && eyeUpd.error) showToast('⚠ アイキャッチのクラウド保存に失敗：'+eyeUpd.error.message,'warn');
+          }catch(e){}
+        }
       }
 
       // アイキャッチ一覧を現在フィルタで再描画
@@ -8462,9 +8621,15 @@ mikke.ruu2025@gmail.com`,
         if(!planId) return;
         var eventId = card.dataset.event;
         var ev = (typeof EVENTS!=='undefined') ? EVENTS.find(function(e){return e.id===eventId}) : null;
-        if(!ev || !ev.feeOptions) return;
-        var plan = ev.feeOptions.find(function(o){return o.id===planId});
-        if(!plan) return;
+        if(!ev) return;
+        var plan = (ev.feeOptions||[]).find(function(o){return o.id===planId});
+        if(!plan){
+          // プラン外（個別設定・手入力金額）は answers.feeYen から表示
+          var recFee = (APPLICATIONS||[]).find(function(a){return a.id===card.id || (card.dataset.supabaseid && a.supabaseId===card.dataset.supabaseid);});
+          var customYen = recFee && recFee.answers ? (parseInt(recFee.answers.feeYen,10)||0) : 0;
+          if(!customYen) return;
+          plan = {label:(recFee.answers.feePlanLabel||'個別設定'), yen:customYen};
+        }
         // 出店内容セクションを見つけて、最後にプランセルを追加（既存があれば更新）
         var sections = card.querySelectorAll('.app-section');
         var contentSection;
@@ -8766,10 +8931,17 @@ mikke.ruu2025@gmail.com`,
       var isEventApp = isParticipantOnlyEvent(ev) || card.dataset.category==='event';
       var planOptions = (ev && ev.feeOptions) ? ev.feeOptions : [];
       var currentPlan = card.dataset.feeplan || '';
-      var planSelectHtml = planOptions.length ?
+      var hasPlanMatch = planOptions.some(function(o){return o.id===currentPlan;});
+      // 個別金額（特定の出店者だけ料金を変える場合。公開プランには表示されない）
+      var existRecFee = (APPLICATIONS||[]).find(function(a){return a.id===appId || (card.dataset.supabaseid && a.supabaseId===card.dataset.supabaseid);});
+      var customSelected = currentPlan==='custom' || (!!currentPlan && !hasPlanMatch) || (!currentPlan && !!(existRecFee&&existRecFee.answers&&parseInt(existRecFee.answers.feeYen,10)>0&&!planOptions.length));
+      var curCustomYen = (existRecFee && existRecFee.answers && parseInt(existRecFee.answers.feeYen,10)) || '';
+      var planSelectHtml =
         '<label style="font-size:11px;font-weight:900;color:var(--sub)">出店料プラン<select class="input" id="ae-feeplan">'+
           planOptions.map(function(o){return '<option value="'+o.id+'"'+(o.id===currentPlan?' selected':'')+'>'+o.label+'　¥'+o.yen.toLocaleString()+'</option>'}).join('')+
-        '</select></label>' : '';
+          '<option value="custom"'+(customSelected?' selected':'')+'>個別設定（下の金額を使う）</option>'+
+        '</select></label>'+
+        '<label style="font-size:11px;font-weight:900;color:var(--sub)">個別金額（円）<input class="input" id="ae-feeyen" type="number" min="0" value="'+(customSelected?curCustomYen:'')+'" placeholder="例：2000（この人だけ料金を変える場合）"><span style="display:block;font-size:10px;font-weight:600;color:var(--sub);margin-top:3px">プランで「個別設定」を選ぶとこの金額が売上集計に使われます。募集画面には表示されません。</span></label>';
 
       if(isEventApp){
         openSheet('申込内容を編集', 'イベント参加申込の内容を修正できます',
@@ -8926,6 +9098,11 @@ mikke.ruu2025@gmail.com`,
               _ans.feePlanId = _feeId;
               var _fo = ((ev&&ev.feeOptions)||[]).find(function(o){return o.id===_feeId;});
               if(_fo){ _ans.feePlanLabel=_fo.label||''; _ans.feeYen=_fo.yen||0; }
+              else if(_feeId==='custom'){
+                // 個別金額（この出店者だけ料金を変える）
+                var _customYen = parseInt((document.getElementById('ae-feeyen')||{value:''}).value,10)||0;
+                _ans.feePlanLabel='個別設定'; _ans.feeYen=_customYen;
+              }
               else {
                 // プラン外の値（手入力金額など）は数字を抜き出して金額として保存
                 var _fyen = parseInt(String(_feeId).replace(/[^0-9]/g,''),10)||0;
@@ -8938,8 +9115,10 @@ mikke.ruu2025@gmail.com`,
             }
           }
           _upd.answers = _ans;
+          // ローカル側にも即反映（売上集計・再編集が正しい値を見るように）
+          if(_existApp) _existApp.answers = _ans;
           _sbUp.from('applications').update(_upd).eq('id',_supabaseRowId)
-            .then(function(r){ if(r&&r.error) console.warn('Supabase update failed',r.error); });
+            .then(function(r){ if(r&&r.error){ console.warn('Supabase update failed',r.error); showToast('⚠ クラウド保存に失敗：'+(r.error.message||''),'warn'); } });
         }
       }
       syncMypageProfileFromLatestApplication();
