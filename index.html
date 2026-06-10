@@ -1122,6 +1122,7 @@
                   <input class="input" id="apply-social" placeholder="Instagram または HP">
                 </div>
               </div>
+              <div id="apply-event-preview" style="display:none;margin-bottom:14px"></div>
               <div id="apply-event-step2" class="info" style="display:none">
                 <b>このイベントは参加申し込みです。</b>
                 <span class="helper">この次のSTEPで、お名前・ふりがな・メールアドレスを入力します。</span>
@@ -1472,7 +1473,7 @@
             <div class="cat-host">
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
                 <button class="cat-tile inline" data-cat="all" onclick="openAppsPanel('all')"><span class="cat-tile-label">申込</span><span class="cat-tile-val">0件</span></button>
-                <button class="cat-tile inline" data-cat="party" onclick="openAppsPanel('party-yes')"><span class="cat-tile-label">交流会参加者</span><span class="cat-tile-val">0名</span></button>
+                <button class="cat-tile inline" data-cat="party" onclick="openDashboardPartyList()"><span class="cat-tile-label">交流会参加者</span><span class="cat-tile-val">0名</span></button>
               </div>
               <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px">
                 <button class="cat-tile center" data-cat="food" onclick="openAppsPanel('food')"><span class="cat-tile-label">飲食</span><span class="cat-tile-val">0/0</span></button>
@@ -2021,6 +2022,7 @@
     var APPLY_TERMS_ACK = false;
     var APPLICATIONS = [];
     var PARTY_APPLICATIONS = [];
+    var EVENTS_LOADING = true; // Supabaseからの初回イベント読み込みが終わるまで true
     var MAIL_LOGS = [];
     var TEXT_SCALE_KEY = 'mikke_text_scale_v1';
     var __surveySubmitting = false;
@@ -2282,7 +2284,7 @@
     }
     async function loadPublicEventsFromSupabase(){
       var sb = getSupabaseClient();
-      if(!sb) return false;
+      if(!sb){ EVENTS_LOADING = false; return false; }
       try{
         var res = await sb.from('events')
           .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,content,detail,cover_image_url,gallery_image_urls,line_group_url,capacity,application_deadline,fee_options,capacities,extra')
@@ -2297,6 +2299,7 @@
         }
         if(res.error) throw res.error;
         (res.data||[]).forEach(function(row){ upsertSupabaseEvent(EVENTS, mapSupabaseEventRow(row)); });
+        EVENTS_LOADING = false;
         normalizeEventDefaults();
         syncPublicEventViews();
         renderEventList();
@@ -2311,6 +2314,8 @@
         }
         return true;
       }catch(e){
+        EVENTS_LOADING = false;
+        syncPublicEventViews();
         showToast('Supabaseのイベント読み込みに失敗しました。試作用データを表示します。', 'warn');
         return false;
       }
@@ -2488,8 +2493,10 @@
         };
         var res = await sb.from('albums').insert(payload).select('id').single();
         if(res.error) throw res.error;
+        window.__lastAlbumSaveError = '';
         return res.data && res.data.id ? res.data.id : null;
       }catch(e){
+        window.__lastAlbumSaveError = (e && e.message) || String(e);
         console.warn('saveAlbumToSupabase failed:', e.message||e);
         return null;
       }
@@ -2514,8 +2521,9 @@
       var sb = getSupabaseClient();
       if(!sb || !albumSupabaseId || !photos || !photos.length) return false;
       try{
+        // id はDB側で自動生成させる（ローカルIDはuuidでないため送るとINSERTが失敗する）
         var rows = photos.map(function(p, i){
-          return {id: p.id, album_id: albumSupabaseId, url: p.src, photo_type: p.type||'image', sort_order: i};
+          return {album_id: albumSupabaseId, url: p.src, photo_type: p.type||'image', sort_order: i};
         }).filter(function(r){return !!r.url;});
         if(!rows.length) return false;
         var res = await sb.from('album_photos').insert(rows);
@@ -3796,20 +3804,31 @@
       if(t4) t4.textContent = isEventApply ? '画像提出について' : 'アイキャッチ画像を登録しましょう';
       var t5 = document.getElementById('apply-step5-title');
       if(t5) t5.textContent = isEventApply ? '交流会情報' : '交流会に参加しますか？';
-      setDisplay('apply-event-step1', isEventApply && applyStep===2, 'grid');
+      // 旧テキスト概要（apply-event-step1）は廃止し、公開プレビューに置き換え
+      setDisplay('apply-event-step1', false);
       setDisplay('apply-basic-step1', !isEventApply || applyStep===1, 'block');
-      // STEP1にはイベント/バザール共通で公開プレビュー（詳細情報カード）を表示
+      // バザール: STEP1（card1）に公開プレビュー＋基本情報
       var bazaarDetailEl = document.getElementById('apply-bazaar-detail');
       if(bazaarDetailEl){
-        if(ev && applyStep===1){
+        if(!isEventApply && ev && applyStep===1){
           bazaarDetailEl.innerHTML = buildEventPublicPreview(ev);
           bazaarDetailEl.style.display = 'block';
         } else {
           bazaarDetailEl.style.display = 'none';
         }
       }
+      // イベント: STEP1（card2）は公開プレビューのみ。お名前などの記入はSTEP2から
+      var evPrevEl = document.getElementById('apply-event-preview');
+      if(evPrevEl){
+        if(isEventApply && ev && applyStep===2){
+          evPrevEl.innerHTML = buildEventPublicPreview(ev);
+          evPrevEl.style.display = 'block';
+        } else {
+          evPrevEl.style.display = 'none';
+        }
+      }
       setDisplay('apply-bazaar-step2', !isEventApply);
-      setDisplay('apply-event-step2', isEventApply, 'grid');
+      setDisplay('apply-event-step2', false);
       setDisplay('apply-bazaar-step3', !isEventApply);
       setDisplay('apply-event-step3', isEventApply, 'grid');
       setDisplay('apply-event-purpose-wrap', false);
@@ -5858,6 +5877,12 @@
         '</div>'
       );
     }
+    // ダッシュボードの「交流会参加者」タイル → 出店者＋一般申込者の両方が見える参加者一覧シートを開く
+    function openDashboardPartyList(){
+      var dashEv = typeof getCurrentDashboardEvent==='function' ? getCurrentDashboardEvent() : null;
+      if(!dashEv || !dashEv.key){showToast('対象バザールがありません','warn');return;}
+      openPartyParticipantsList(dashEv.key);
+    }
     function openPartyParticipantsList(evId){
       var ev = (EVENTS||[]).find(function(e){return e.id===evId;});
       if(!ev){showToast('対象イベントがありません','warn');return;}
@@ -6113,9 +6138,9 @@
       var isEventOnly = isParticipantOnlyEvent(ev);
       var kindBadge = getEventKindBadgeHtml(ev);
       var favoriteButton = renderFavoriteButton(ev.id);
-      // 出店者（確定者）
+      // 出店者（確定者・アイキャッチ提出済みの人のみ公開）
       var confirmedApps = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card'))
-        .filter(function(c){return c.dataset.event===ev.id && c.dataset.status==='confirmed' && !isEventOnly});
+        .filter(function(c){return c.dataset.event===ev.id && c.dataset.status==='confirmed' && !isEventOnly && /^(https?:|data:image)/.test(c.dataset.eyecatchsrc||'')});
       var exhibitorsHtml = confirmedApps.length ?
         confirmedApps.map(function(c){
           var name = c.dataset.shopname||'';
@@ -6192,8 +6217,9 @@
         return;
       }
       if(sub) sub.textContent = ev.name + ' に参加する出店者さんをご紹介します。';
+      // アイキャッチ提出済みの出店者のみ公開
       var apps = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card'))
-        .filter(function(c){return c.dataset.event===ev.id && c.dataset.status==='confirmed'});
+        .filter(function(c){return c.dataset.event===ev.id && c.dataset.status==='confirmed' && /^(https?:|data:image)/.test(c.dataset.eyecatchsrc||'')});
       // タブのカウント
       var tabs = document.querySelectorAll('#exhibitors-tabs button');
       if(tabs.length>=5){
@@ -6229,6 +6255,14 @@
       var card = document.querySelector('#home > article.event-card');
       if(!card) return;
       card.onclick = null;
+      if(!ev && EVENTS_LOADING){
+        card.innerHTML =
+          '<div class="event-photo"></div>'+
+          '<span class="badge mint">読み込み中</span>'+
+          '<h1 class="event-title">イベント情報を読み込んでいます…</h1>'+
+          '<p class="helper">少しだけお待ちください。</p>';
+        return;
+      }
       if(!ev){
         var anyPublic = getFirstPublicEvent();
         card.innerHTML =
@@ -6578,7 +6612,7 @@
       if(!host) return;
       var list = getFutureEvents().slice(1, 4);
       if(!list.length){
-        host.innerHTML = '<p class="helper" style="text-align:center;padding:20px 0">今後のイベントはありません。</p>';
+        host.innerHTML = '<p class="helper" style="text-align:center;padding:20px 0">'+(EVENTS_LOADING?'読み込み中…':'今後のイベントはありません。')+'</p>';
         return;
       }
       host.innerHTML = list.map(function(ev){
@@ -6649,7 +6683,7 @@
         });
       }
       if(!list.length){
-        host.innerHTML = '<p class="helper" style="text-align:center;padding:30px 0">公開中のイベントはありません。</p>';
+        host.innerHTML = '<p class="helper" style="text-align:center;padding:30px 0">'+(EVENTS_LOADING?'読み込み中…':'公開中のイベントはありません。')+'</p>';
         return;
       }
       var buildRows = function(items){
@@ -10723,7 +10757,7 @@ mikke.ruu2025@gmail.com`,
       var photos = Array.isArray(ev.venuePhotos) ? ev.venuePhotos : [];
       var cells = photos.map(function(src, i){
         return '<div class="album-photo-cell">'+
-          '<img src="'+src+'" alt="下見写真" onclick="window.open(\''+src+'\',\'_blank\')">'+
+          '<img src="'+src+'" alt="下見写真" onclick="openVenuePhotoLightbox(\''+ev.id+'\','+i+')">'+
           '<button class="photo-del" type="button" onclick="removeVenuePhoto(\''+ev.id+'\','+i+')">×</button>'+
         '</div>';
       }).join('');
@@ -10761,6 +10795,15 @@ mikke.ruu2025@gmail.com`,
       if(saveRes!==true){ showToast('⚠ 下見写真のクラウド保存に失敗：'+saveRes,'warn'); }
       else { showToast('下見写真を保存しました','success'); }
       renderEventList();
+    }
+    // 下見写真をライトボックスで拡大表示
+    function openVenuePhotoLightbox(evId, idx){
+      var ev = (EVENTS||[]).find(function(e){return e.id===evId;});
+      if(!ev || !Array.isArray(ev.venuePhotos) || !ev.venuePhotos.length) return;
+      LIGHTBOX_LIST = ev.venuePhotos.map(function(src){return {type:'image', src:src};});
+      LIGHTBOX_INDEX = Math.max(0, Math.min(idx||0, LIGHTBOX_LIST.length-1));
+      renderLightbox();
+      document.getElementById('lightbox').classList.add('open');
     }
     async function removeVenuePhoto(evId, idx){
       var ev = (EVENTS||[]).find(function(e){return e.id===evId;});
@@ -12134,7 +12177,8 @@ mikke.ruu2025@gmail.com`,
         saveAlbumToSupabase(album).then(function(supabaseId){
           if(!supabaseId){
             if(typeof getSupabaseClient==='function' && getSupabaseClient()){
-              showToast('⚠ アルバムのクラウド保存に失敗しました。管理者ログインを確認してください（このままだとリロードで消えます）','warn');
+              var albErr = window.__lastAlbumSaveError || '不明なエラー';
+              showToast('⚠ アルバムのクラウド保存に失敗：'+albErr+'（このままだとリロードで消えます）','warn');
             }
             return;
           }
