@@ -2141,8 +2141,19 @@
             showToast('マイページにログインしました', 'success');
             return true;
           }
+          // プロフィール同期に失敗してもセッションが取れていればマイページへ
+          if(session){
+            history.replaceState(null, '', location.pathname + '#mypage');
+            showPage('mypage', true);
+            renderAll();
+            return true;
+          }
         }catch(e){
-          showToast('ログイン処理に失敗しました', 'warn');
+          // トークンが使用済み・期限切れ等。真っ白のまま放置せずマイページのログインフォームへ誘導
+          history.replaceState(null, '', location.pathname + '#mypage');
+          showPage('mypage', true);
+          showToast('ログインリンクが使用済みか期限切れです。メールアドレスを入力して新しいリンクを送ってください。', 'warn');
+          return false;
         }
       }
       try{
@@ -2637,6 +2648,7 @@
             supabaseId: row.id,
             title: row.title,
             subtitle: row.subtitle||'',
+            date: (typeof datePartFromIso==='function' ? datePartFromIso(row.created_at) : '')||'',
             type: row.type||'event',
             eventKey: ev ? ev.id : '',
             photos: photos,
@@ -5106,7 +5118,11 @@
       renderApplicationButtons();
       bindApplyReuseEvents();
       var rawHash = (location.hash || '#home').replace('#','');
-      if(rawHash.indexOf('event=')===0){
+      if(rawHash.indexOf('access_token')!==-1 || rawHash.indexOf('error')===0 || rawHash.indexOf('type=recovery')!==-1){
+        // ログインリンク経由（Supabase認証コールバック）。ページ名ではないので
+        // ホームを表示しておき、initSupabaseAuthFromUrl がログイン処理後にマイページへ遷移する
+        showPage('home', true);
+      }else if(rawHash.indexOf('event=')===0){
         tryOpenEventFromHash(rawHash);
       }else if(rawHash.indexOf('survey')===0){
         var params = new URLSearchParams(rawHash.replace(/^survey&?/, ''));
@@ -12559,7 +12575,9 @@ mikke.ruu2025@gmail.com`,
       // Supabase 削除（album_photos は CASCADE で自動削除）
       if(a.supabaseId){
         var sb3 = getSupabaseClient();
-        if(sb3) sb3.from('albums').delete().eq('id', a.supabaseId).then(function(){});
+        if(sb3) sb3.from('albums').delete().eq('id', a.supabaseId).then(function(r){
+          if(r && r.error){ showToast('⚠ クラウド側の削除に失敗：'+(r.error.message||'')+'（リロードで復活します）','warn'); }
+        });
       }
       ALBUMS = ALBUMS.filter(function(x){return x.id!==albumId});
       closeSheet();
