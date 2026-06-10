@@ -443,6 +443,12 @@
     .tpl-tag-chips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}
     .tpl-tag-chips button{font-size:11px;padding:4px 9px;border-radius:99px;background:#fff5f7;border:1px solid #fde8ee;color:var(--ruu);font-weight:850;cursor:pointer;font-family:inherit}
     .tpl-tag-chips button:hover{background:var(--ruu);color:#fff;border-color:var(--ruu)}
+    /* スマホで定型文シート等が横に見切れないように */
+    .tpl-tag-chips{max-width:100%}
+    .tpl-tag-chips button{word-break:break-all}
+    #te-preview{overflow-wrap:anywhere;word-break:break-all}
+    #sheet-body{max-width:100%;overflow-x:hidden}
+    #sheet-body .input,#sheet-body textarea,#sheet-body select{max-width:100%;box-sizing:border-box}
     .tpl-category-badge{display:inline-block;font-size:10.5px;font-weight:900;padding:2px 7px;border-radius:99px;background:#f3eff7;color:var(--sub);letter-spacing:.04em;margin-right:5px}
     .tpl-category-badge.recruit{background:#fff5f7;color:var(--ruu)}
     .tpl-category-badge.confirm{background:#e1f5ee;color:#3ba48a}
@@ -1495,7 +1501,7 @@
               <span style="width:32px;height:32px;border-radius:11px;background:#f3f0ff;display:grid;place-items:center"><svg class="icon" style="width:17px;height:17px;color:var(--ruu)"><use href="#i-calendar"/></svg></span>
               <span style="font-size:11px;font-weight:850;color:var(--ink)">詳細</span>
             </button>
-            <button onclick="toggleAdminPanel('admin-eyecatch')" style="display:grid;justify-items:center;gap:5px;padding:11px 6px;border-radius:14px;border:1px solid var(--line);background:#fff;cursor:pointer">
+            <button onclick="openAdminPanelForce('admin-eyecatch')" style="display:grid;justify-items:center;gap:5px;padding:11px 6px;border-radius:14px;border:1px solid var(--line);background:#fff;cursor:pointer">
               <span style="width:32px;height:32px;border-radius:11px;background:#f3f0ff;display:grid;place-items:center"><svg class="icon" style="width:17px;height:17px;color:var(--ruu)"><use href="#i-download"/></svg></span>
               <span style="font-size:11px;font-weight:850;color:var(--ink)">アイキャッチDL</span>
             </button>
@@ -2003,6 +2009,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script>
     if('scrollRestoration' in history){history.scrollRestoration='manual'}
     let applyStep = 1;
@@ -2269,6 +2276,7 @@
         zoomPass: ex.zoomPass || '',
         payment: ex.payment || '当日現金',
         party: (ex.party && typeof ex.party === 'object') ? ex.party : {enabled:false},
+        venuePhotos: Array.isArray(ex.venuePhotos) ? ex.venuePhotos : [],
         source: 'supabase'
       };
     }
@@ -2296,6 +2304,11 @@
         renderMypageEventCards();
         // Supabaseイベント読込後に主催者ダッシュボードのバザールセレクタを再構築
         if(typeof refreshAdminDashboardEventSelector==='function') refreshAdminDashboardEventSelector();
+        // 共有URL（#event=ID）で開かれていた場合、読込完了後に詳細ページを開く
+        if(__pendingEventHashKey){
+          var pendEv = (EVENTS||[]).find(function(e){return e.id===__pendingEventHashKey || e.supabaseId===__pendingEventHashKey;});
+          if(pendEv){ __pendingEventHashKey=''; viewEventDetail(pendEv.id); }
+        }
         return true;
       }catch(e){
         showToast('Supabaseのイベント読み込みに失敗しました。試作用データを表示します。', 'warn');
@@ -2317,7 +2330,7 @@
         user_id: row.user_id || '',
         event: ev ? ev.id : row.event_id,
         status: row.status === 'confirmed' ? 'confirmed' : row.status === 'hold' ? 'hold' : 'new',
-        line: '0',
+        line: ans.line || '0',
         eyecatch: row.eyecatch_image_url ? '1' : '0',
         eyecatchImage: row.eyecatch_image_url || '',
         category: row.category || (isEv ? 'event' : ''),
@@ -2404,7 +2417,8 @@
           zoomPass:         ev.zoomPass || '',
           payment:          ev.payment || '',
           party:            ev.party || {enabled:false},
-          flyerImages:      ev.flyerImages || []
+          flyerImages:      ev.flyerImages || [],
+          venuePhotos:      ev.venuePhotos || []
         }
       };
       try{
@@ -2601,7 +2615,8 @@
           .select(selectCols)
           .order('created_at', {ascending:false});
         if(res.error) throw res.error;
-        var remoteApps = (res.data||[]).map(mapSupabaseApplicationRow);
+        var _notParty = function(r){return !(r.answers && r.answers.partyGeneral);};
+        var remoteApps = (res.data||[]).filter(_notParty).map(mapSupabaseApplicationRow);
         // RLS が user_id ベースの場合、メールアドレスでも取得して補完
         if(CURRENT_USER_EMAIL){
           var res2 = await sb.from('applications')
@@ -2609,7 +2624,7 @@
             .eq('email', CURRENT_USER_EMAIL)
             .order('created_at', {ascending:false});
           if(!res2.error){
-            (res2.data||[]).map(mapSupabaseApplicationRow).forEach(function(app){
+            (res2.data||[]).filter(_notParty).map(mapSupabaseApplicationRow).forEach(function(app){
               if(!remoteApps.find(function(a){return a.id===app.id;})) remoteApps.push(app);
             });
           }
@@ -2675,6 +2690,32 @@
     }
     function getAppBaseUrl(){
       return location.origin + location.pathname;
+    }
+    // イベント共有URL（#event=ID 形式。起動時ルーティングで詳細ページが開く）
+    function getEventShareUrl(ev){
+      if(!ev) return getAppBaseUrl();
+      return getAppBaseUrl() + '#event=' + encodeURIComponent(ev.id);
+    }
+    function copyEventShareUrl(evId){
+      var ev = (EVENTS||[]).find(function(e){return e.id===evId;});
+      if(!ev){showToast('イベントが見つかりません','warn');return;}
+      copyText(getEventShareUrl(ev));
+    }
+    var __pendingEventHashKey = '';
+    function tryOpenEventFromHash(rawHash){
+      var m = String(rawHash||'').match(/^event=([^&]+)/);
+      if(!m) return false;
+      var key = decodeURIComponent(m[1]);
+      var ev = (EVENTS||[]).find(function(e){return e.id===key || e.supabaseId===key;});
+      if(ev){
+        __pendingEventHashKey = '';
+        viewEventDetail(ev.id);
+      } else {
+        // Supabaseイベント読込前なら、読込完了後に開く
+        __pendingEventHashKey = key;
+        showPage('home', true);
+      }
+      return true;
     }
     async function sendAdminMagicLink(){
       var sb = getSupabaseClient();
@@ -2787,7 +2828,28 @@
             supabaseEventKeys.add(ev.supabaseId);
           }
         });
-        var remoteApps = (res.data||[]).map(mapSupabaseApplicationRow);
+        // 一般交流会申込（answers.partyGeneral）は申込カードではなく交流会参加者リストへ
+        var allRows = (res.data||[]);
+        var partyRows = allRows.filter(function(r){return r.answers && r.answers.partyGeneral;});
+        var appRows = allRows.filter(function(r){return !(r.answers && r.answers.partyGeneral);});
+        PARTY_APPLICATIONS = partyRows.map(function(r){
+          var pev = (EVENTS||[]).find(function(item){return item.supabaseId===r.event_id || item.id===r.event_id;});
+          return {
+            id: r.id, supabaseId: r.id,
+            eventId: pev ? pev.id : r.event_id,
+            eventName: pev ? pev.name : '',
+            name: r.person_name||'',
+            email: r.email||'',
+            count: r.attendee_count||1,
+            comment: (r.answers&&r.answers.comment)||r.content||'',
+            createdAt: datePartFromIso(r.created_at)
+          };
+        });
+        // 一般参加者数を再集計（売上見込み・参加者一覧用）
+        (EVENTS||[]).forEach(function(pe){
+          if(pe.party && pe.party.enabled){ pe.party.generalCount = sumGeneralPartyCountByEvent(pe.id); }
+        });
+        var remoteApps = appRows.map(mapSupabaseApplicationRow);
         remoteApps.forEach(function(app){
           if(app.event) supabaseEventKeys.add(app.event);
         });
@@ -2971,6 +3033,8 @@
       var sb = typeof getSupabaseClient==='function' ? getSupabaseClient() : null;
       if(sb && supabaseEventId){
         var feeOptObj = (targetEv.feeOptions||[]).find(function(o){return o.id===fee;});
+        // プランに無い自由入力（例: "3500" や "3,500円"）は数字を抜き出して金額として保存
+        var manualYen = feeOptObj ? (parseInt(feeOptObj.yen,10)||0) : (parseInt(String(fee).replace(/[^0-9]/g,''),10)||0);
         var res = await sb.from('applications').insert({
           event_id: supabaseEventId,
           email: placeholderEmail,
@@ -2987,8 +3051,8 @@
             uwid: uwidVal||'',
             achiever: achieverVal||'',
             feePlanId: isEvent ? 'event-fee' : (fee||''),
-            feePlanLabel: feeOptObj ? (feeOptObj.label||'') : '',
-            feeYen: feeOptObj ? (feeOptObj.yen||0) : 0,
+            feePlanLabel: feeOptObj ? (feeOptObj.label||'') : (fee||''),
+            feeYen: isEvent ? 0 : manualYen,
             party: 'tbd',
             content: content||'',
             adminRequest: memo||''
@@ -3347,6 +3411,12 @@
       var target=document.getElementById(id);
       if(target){target.classList.add('active')}
       if(id === 'admin'){
+        // 他ページから戻ってきたとき、前回開いていたパネルが残らないようリセット
+        if(current && current.id && current.id !== 'admin'){
+          document.querySelectorAll('.admin-panel.open').forEach(function(p){p.classList.remove('open')});
+          var apb=document.getElementById('admin-panel-backdrop');
+          if(apb) apb.classList.remove('open');
+        }
         if(typeof renderAdminLoginState==='function') renderAdminLoginState();
         if(typeof window.refreshAdminDashboardEventSelector==='function'){
           window.refreshAdminDashboardEventSelector();
@@ -3728,10 +3798,10 @@
       if(t5) t5.textContent = isEventApply ? '交流会情報' : '交流会に参加しますか？';
       setDisplay('apply-event-step1', isEventApply && applyStep===2, 'grid');
       setDisplay('apply-basic-step1', !isEventApply || applyStep===1, 'block');
-      // 出店募集要項（detail）は出店申込者向けに申込STEP1で表示。一般向けの短文(content)は公開詳細ページの「内容」に表示。
+      // STEP1にはイベント/バザール共通で公開プレビュー（詳細情報カード）を表示
       var bazaarDetailEl = document.getElementById('apply-bazaar-detail');
       if(bazaarDetailEl){
-        if(!isEventApply && ev && applyStep===1){
+        if(ev && applyStep===1){
           bazaarDetailEl.innerHTML = buildEventPublicPreview(ev);
           bazaarDetailEl.style.display = 'block';
         } else {
@@ -3955,15 +4025,13 @@
       }
       radios.forEach(function(r){r.disabled = false;});
       var pp = ev.party;
-      var counts = getPartyParticipantCounts(ev);
       var capacity = parseInt(pp.capacity||0,10)||0;
-      var rest = capacity>0 ? Math.max(capacity-counts.total,0) : null;
       host.innerHTML =
         '<b>'+(pp.title||'交流会')+'</b>'+
         '<b>日時：'+formatEvDateShort(ev)+' '+(pp.startTime||'-')+'〜'+(pp.endTime||'-')+'</b>'+
         '<b>会場：'+(pp.venue||pp.address||'-')+'</b>'+
         '<b>参加費：'+(pp.fee?('¥'+(parseInt(pp.fee,10)||0).toLocaleString()):'-')+'（'+(pp.payment||'-')+'）</b>'+
-        '<b>定員：'+(capacity>0?(capacity+'名'+(rest!==null?'（残り '+rest+'名）':'')):'-')+'</b>'+
+        '<b>定員：'+(capacity>0?(capacity+'名'):'-')+'</b>'+
         '<b>申込締切：'+(pp.deadline||'-')+'</b>'+
         '<b>受付範囲：'+(pp.audience||'-')+'</b>'+
         (pp.description?'<span class="helper" style="display:block">'+h(pp.description)+'</span>':'');
@@ -4172,11 +4240,11 @@
       return !(app.category==='event' || isParticipantOnlyEvent(event));
     }
     function getMypageAccessMode(userApps){
-      if(CURRENT_USER_ROLE==='admin') return 'admin-empty'; // 管理者は常に admin-empty（mypage 表示なし）
+      // 管理者でも自分の申込があれば出店者/参加者としてマイページを使える
       var apps = Array.isArray(userApps) ? userApps : getCurrentUserApplications();
       if(apps.some(isBazaarApplication)) return 'bazaar';
       if(apps.length>0) return 'event';
-      return 'empty';
+      return CURRENT_USER_ROLE==='admin' ? 'admin-empty' : 'empty';
     }
     function renderMypageAccessState(userApps){
       var apps = Array.isArray(userApps) ? userApps : getCurrentUserApplications();
@@ -4887,7 +4955,9 @@
       renderApplicationButtons();
       bindApplyReuseEvents();
       var rawHash = (location.hash || '#home').replace('#','');
-      if(rawHash.indexOf('survey')===0){
+      if(rawHash.indexOf('event=')===0){
+        tryOpenEventFromHash(rawHash);
+      }else if(rawHash.indexOf('survey')===0){
         var params = new URLSearchParams(rawHash.replace(/^survey&?/, ''));
         var ret = params.get('return') || '';
         showPage(ret.indexOf('admin')===0 ? 'admin' : 'home', true);
@@ -4950,9 +5020,15 @@
       clearAppsSummaryQuickFilter();
       filterAppsCombined();
     }
+    // パネルを必ず「開いた状態」にする（既に開いていれば何もしない。トグルによる開閉反転を防ぐ）
+    function openAdminPanelForce(id){
+      var panel=document.getElementById(id);
+      if(panel && panel.classList.contains('open')){ panel.scrollTop=0; return; }
+      toggleAdminPanel(id);
+    }
     function openAppsPanel(filter){
       __appsKindMode = 'bazaar';
-      toggleAdminPanel('admin-applications');
+      openAdminPanelForce('admin-applications');
       document.querySelectorAll('#admin-applications .app-status-chip').forEach(function(b){b.classList.remove('active');});
       var drop=document.getElementById('apps-drop-filter');
       if(drop) drop.value='all';
@@ -4984,7 +5060,7 @@
     function openAppsForKind(kind){
       __appsKindMode = kind;
       clearAppsSummaryQuickFilter();
-      toggleAdminPanel('admin-applications');
+      openAdminPanelForce('admin-applications');
       // タイトル・説明を切り替え
       var title = document.getElementById('apps-panel-title');
       var desc  = document.getElementById('apps-panel-desc');
@@ -5316,6 +5392,18 @@
       var noBadge=card.querySelector('.line-no-badge');
       if(badge) badge.style.display=checkbox.checked?'':'none';
       if(noBadge) noBadge.style.display=checkbox.checked?'none':'';
+      // Supabaseにも保存（リロードで消えないように answers.line に永続化）
+      var sbId = card.dataset.supabaseid;
+      var sbLine = typeof getSupabaseClient==='function' ? getSupabaseClient() : null;
+      if(sbLine && sbId){
+        var recLine = (APPLICATIONS||[]).find(function(a){return a.supabaseId===sbId || a.id===sbId;});
+        var ansLine = Object.assign({}, (recLine&&recLine.answers)||{}, {line: checkbox.checked?'1':'0'});
+        if(recLine){ recLine.answers = ansLine; recLine.line = checkbox.checked?'1':'0'; }
+        sbLine.from('applications').update({answers: ansLine}).eq('id', sbId)
+          .then(function(r){
+            if(r&&r.error){ showToast('LINEチェックのクラウド保存に失敗しました（リロードで戻ります）','warn'); }
+          });
+      }
       setTimeout(function(){
         filterAppsCombined();
         syncApplicationsFromCards();
@@ -5380,7 +5468,9 @@
       var list = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card'))
         .filter(function(card){
           if(card.dataset.kind!=='bazaar') return false;
-          if(!card.dataset.eyecatchsrc) return false;
+          // 実際に提出された画像（URL/data-URL）がある人だけ表示
+          var eyeSrcChk = card.dataset.eyecatchsrc||'';
+          if(!/^(https?:|data:image)/.test(eyeSrcChk)) return false;
           if(eventVal!=='all' && card.dataset.event!==eventVal) return false;
           if(query){
             var txt = ((card.dataset.personname||'')+' '+(card.dataset.shopname||'')).replace(/\s/g,'').toLowerCase();
@@ -5452,26 +5542,45 @@
       if(!imgs.length){ showToast('ダウンロード対象がありません'); return; }
       var btn=document.getElementById('eyecatch-bulk-btn');
       if(btn){ btn.disabled=true; btn.style.opacity='.6'; }
-      showToast('DL準備中…（'+imgs.length+'枚）');
+      var useZip = typeof JSZip !== 'undefined';
+      showToast(useZip ? ('ZIPを作成中…（'+imgs.length+'枚）') : ('DL準備中…（'+imgs.length+'枚）'));
       var ok=0, fail=0;
+      var zip = useZip ? new JSZip() : null;
+      var usedNames = {};
       for(var i=0;i<imgs.length;i++){
         var img=imgs[i];
         var item=img.closest('.eyecatch-item');
         var nameEl=item ? item.querySelector('.eyecatch-item-name') : null;
         var title=(nameEl ? nameEl.textContent : 'eyecatch-'+i).replace(/[/\\:*?"<>|]/g,'_');
+        if(usedNames[title]){ title = title+'_'+(++usedNames[title]); } else { usedNames[title]=1; }
         try{
           var blob=await _fetchBlob(img.src);
-          var url=URL.createObjectURL(blob);
-          var a=document.createElement('a');
-          a.href=url; a.download=title+'.jpg';
-          document.body.appendChild(a); a.click(); document.body.removeChild(a);
-          setTimeout(function(u){ URL.revokeObjectURL(u); },5000,url);
+          if(useZip){
+            zip.file(title+'.jpg', blob);
+          }else{
+            // JSZip未読込時のフォールバック（従来の個別DL）
+            var url=URL.createObjectURL(blob);
+            var a=document.createElement('a');
+            a.href=url; a.download=title+'.jpg';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(function(u){ URL.revokeObjectURL(u); },5000,url);
+            await new Promise(function(r){setTimeout(r,300);});
+          }
           ok++;
-          await new Promise(function(r){setTimeout(r,300);});
         }catch(e){ fail++; }
       }
+      if(useZip && ok){
+        try{
+          var zblob = await zip.generateAsync({type:'blob'});
+          var zurl = URL.createObjectURL(zblob);
+          var za=document.createElement('a');
+          za.href=zurl; za.download='eyecatch_'+todayStr().replace(/[^0-9]/g,'')+'.zip';
+          document.body.appendChild(za); za.click(); document.body.removeChild(za);
+          setTimeout(function(){ URL.revokeObjectURL(zurl); },5000);
+        }catch(e){ fail=imgs.length; ok=0; }
+      }
       if(btn){ btn.disabled=false; btn.style.opacity=''; }
-      showToast(ok+'枚ダウンロードしました'+(fail?'（'+fail+'枚失敗）':''), fail?'':'success');
+      showToast((useZip&&ok ? 'ZIPにまとめて'+ok+'枚ダウンロードしました' : ok+'枚ダウンロードしました')+(fail?'（'+fail+'枚失敗）':''), fail?'':'success');
     }
     function filterEyecatch(){
       var visible = renderEyecatchGrid();
@@ -5679,7 +5788,7 @@
         .filter(function(x){return x.eventId===evId;})
         .reduce(function(sum,x){return sum + (parseInt(x.count,10)||0)},0);
     }
-    function submitPartyApplication(){
+    async function submitPartyApplication(){
       var ev = getPartyLinkedEvent();
       if(!ev || !ev.party || !ev.party.enabled){
         showToast('対象の交流会が見つかりません','warn');
@@ -5695,6 +5804,28 @@
       var comment = (commentEl && commentEl.value || '').trim();
       if(!name){showToast('お名前を入力してください','warn');return;}
       if(!email){showToast('メールアドレスを入力してください','warn');return;}
+
+      // Supabaseに保存（applicationsテーブル・answers.partyGeneral=true で一般交流会申込と判別）
+      var sb = typeof getSupabaseClient==='function' ? getSupabaseClient() : null;
+      if(sb && ev.supabaseId){
+        try{
+          var insRes = await sb.from('applications').insert({
+            event_id: ev.supabaseId,
+            email: email,
+            person_name: name,
+            shop_name: '',
+            category: 'party',
+            content: comment || null,
+            attendee_count: count,
+            status: 'new',
+            answers: { partyGeneral: true, party: 'yes', count: count, comment: comment }
+          });
+          if(insRes.error) throw insRes.error;
+        }catch(e){
+          showToast('申込の保存に失敗しました：'+((e&&e.message)||'通信エラー'),'warn');
+          return;
+        }
+      }
 
       PARTY_APPLICATIONS.unshift({
         id: 'party-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,6),
@@ -5804,15 +5935,13 @@
       }
       CURRENT_PARTY_EVID = ev.id;
       var pp = ev.party;
-      var counts = getPartyParticipantCounts(ev);
       var capacity = parseInt(pp.capacity||0,10)||0;
-      var rest = capacity>0 ? Math.max(capacity-counts.total,0) : null;
       titleEl.textContent = pp.title || '交流会';
       metaEl.innerHTML =
         '<span><svg class="icon"><use href="#i-calendar"/></svg> '+formatEvDateShort(ev)+' '+(pp.startTime||'-')+'〜'+(pp.endTime||'-')+'</span>'+
         '<span><svg class="icon"><use href="#i-map"/></svg> '+(pp.venue||pp.address||'-')+'</span>';
       feeEl.textContent = pp.fee ? ('¥'+(parseInt(pp.fee,10)||0).toLocaleString()+'（'+(pp.payment||'')+'）') : '-';
-      capEl.textContent = capacity>0 ? (capacity+'名'+(rest!==null?'（残り '+rest+'名）':'')) : '-';
+      capEl.textContent = capacity>0 ? (capacity+'名') : '-';
       dlEl.textContent = pp.deadline || '-';
       descEl.textContent = pp.description || '交流会情報をご確認ください。';
     }
@@ -7958,14 +8087,17 @@ mikke.ruu2025@gmail.com`,
       var opts = ev.feeOptions || [];
       var apps = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card'))
         .filter(function(c){return c.dataset.event === ev.id && c.dataset.status === 'confirmed'})
-        .map(function(c){return {feePlan:c.dataset.feeplan||'', party:c.dataset.party||''}});
+        .map(function(c){return {id:c.id, feePlan:c.dataset.feeplan||'', party:c.dataset.party||''}});
       if(isPast && ev.pastExhibitors){
-        ev.pastExhibitors.forEach(function(p){apps.push({feePlan:p.feePlan||'', party:p.partyJoined?'yes':''})});
+        ev.pastExhibitors.forEach(function(p){apps.push({id:'', feePlan:p.feePlan||'', party:p.partyJoined?'yes':''})});
       }
       var feeTotal = 0;
       apps.forEach(function(a){
         var p = opts.find(function(o){return o.id===a.feePlan});
-        if(p) feeTotal += p.yen;
+        if(p){ feeTotal += p.yen; return; }
+        // プランIDが一致しない場合は answers.feeYen（手入力金額など）を参照
+        var rec = a.id ? (APPLICATIONS||[]).find(function(x){return x.id===a.id || x.supabaseId===a.id;}) : null;
+        if(rec && rec.answers) feeTotal += (parseInt(rec.answers.feeYen,10)||0);
       });
       // 交流会合計
       var partyTotal = 0;
@@ -8760,6 +8892,11 @@ mikke.ruu2025@gmail.com`,
               _ans.feePlanId = _feeId;
               var _fo = ((ev&&ev.feeOptions)||[]).find(function(o){return o.id===_feeId;});
               if(_fo){ _ans.feePlanLabel=_fo.label||''; _ans.feeYen=_fo.yen||0; }
+              else {
+                // プラン外の値（手入力金額など）は数字を抜き出して金額として保存
+                var _fyen = parseInt(String(_feeId).replace(/[^0-9]/g,''),10)||0;
+                if(_fyen){ _ans.feePlanLabel=_feeId; _ans.feeYen=_fyen; }
+              }
             }
             // アイキャッチも直接UPDATEで保存（RPC未デプロイでも消えないように）
             if(typeof card.dataset.eyecatchsrc === 'string'){
@@ -9666,7 +9803,8 @@ mikke.ruu2025@gmail.com`,
         .replace(/\{\{ZoomTime\}\}/g, ev.zoomTime||'')
         .replace(/\{\{ZoomID\}\}/g, ev.zoomId||'')
         .replace(/\{\{ZoomPass\}\}/g, ev.zoomPass||'')
-        .replace(/\{\{募集URL\}\}/g, 'https://mikke-ruu.app/events/'+ev.id+'/apply')
+        .replace(/\{\{募集URL\}\}/g, getEventShareUrl(ev))
+        .replace(/\{\{アンケートURL\}\}/g, (typeof getExhibitorSurveyUrl==='function' ? getExhibitorSurveyUrl(ev.id) : ''))
         .replace(/\{\{出店料\}\}/g, fees)
         .replace(/\{\{定員\}\}/g, capTotal+'店舗')
         .replace(/\{\{ハッシュタグ\}\}/g, generateHashtags(ev))
@@ -9883,7 +10021,7 @@ mikke.ruu2025@gmail.com`,
     }
     function openTplSheet(t, isNew){
       var esc = function(s){return (s||'').replace(/"/g,'&quot;')};
-      var availableTags = ['{{イベント名}}','{{日付}}','{{曜日}}','{{時間}}','{{場所}}','{{住所}}','{{マップURL}}','{{ZoomDate}}','{{ZoomTime}}','{{ZoomID}}','{{ZoomPass}}','{{募集URL}}','{{出店料}}','{{定員}}','{{ハッシュタグ}}','{{LINEオープンチャット}}','{{LINEグループ}}'];
+      var availableTags = ['{{イベント名}}','{{日付}}','{{曜日}}','{{時間}}','{{場所}}','{{住所}}','{{マップURL}}','{{ZoomDate}}','{{ZoomTime}}','{{ZoomID}}','{{ZoomPass}}','{{募集URL}}','{{アンケートURL}}','{{出店料}}','{{定員}}','{{ハッシュタグ}}','{{LINEオープンチャット}}','{{LINEグループ}}'];
       var emojiGroups = {
         'イベント':['🎪','🎉','🎈','🛍️','🎁','🎀','🌟','✨'],
         '日時/場所':['📅','📍','🕐','🗺️','🏠','🚶'],
@@ -10394,17 +10532,25 @@ mikke.ruu2025@gmail.com`,
       // バザール: 出店料のみ（交流会売上は buildPartyRevenue で交流会プレビュー直下に表示）
       var apps = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card'))
         .filter(function(c){return c.dataset.event === ev.id && c.dataset.status === 'confirmed'})
-        .map(function(c){return {feePlan:c.dataset.feeplan||''}});
+        .map(function(c){return {id:c.id, feePlan:c.dataset.feeplan||''}});
       if(isPast && ev.pastExhibitors){
-        ev.pastExhibitors.forEach(function(p){apps.push({feePlan:p.feePlan||''})});
+        ev.pastExhibitors.forEach(function(p){apps.push({id:'', feePlan:p.feePlan||''})});
       }
       var planSummary = opts.map(function(o){
         var cnt = apps.filter(function(a){return a.feePlan===o.id}).length;
         return {opt:o, count:cnt, sub:(parseInt(o.yen,10)||0)*cnt};
       });
       var feeTotal = planSummary.reduce(function(s,x){return s+x.sub},0);
+      // プランIDが一致しない申込は answers.feeYen（手入力金額など）で加算
+      var unmatchedApps = apps.filter(function(a){return !a.feePlan || !opts.find(function(o){return o.id===a.feePlan})});
+      var unmatchedYen = 0;
+      unmatchedApps.forEach(function(a){
+        var rec = a.id ? (APPLICATIONS||[]).find(function(x){return x.id===a.id || x.supabaseId===a.id;}) : null;
+        if(rec && rec.answers) unmatchedYen += (parseInt(rec.answers.feeYen,10)||0);
+      });
+      feeTotal += unmatchedYen;
       var actual = (isPast && ev.actualRevenue!=null) ? ev.actualRevenue : feeTotal;
-      var unspecified = apps.filter(function(a){return !a.feePlan || !opts.find(function(o){return o.id===a.feePlan})}).length;
+      var unspecified = unmatchedApps.length;
       var label = isPast ? '実績売上（出店料）' : '見込み売上（出店料）';
 
       // 詳細行
@@ -10412,7 +10558,7 @@ mikke.ruu2025@gmail.com`,
         return '<div class="ev-revenue-row"><span class="lbl">'+ps.opt.label+' ¥'+(parseInt(ps.opt.yen,10)||0).toLocaleString()+' × '+ps.count+'人</span><span class="val">¥'+ps.sub.toLocaleString()+'</span></div>';
       }).join('') : '<div class="ev-revenue-row"><span class="lbl">出店料プラン未設定</span></div>';
       if(unspecified>0){
-        detailRows += '<div class="ev-revenue-row" style="font-size:10px;color:#c8824f"><span class="lbl">⚠ プラン未指定</span><span class="val">'+unspecified+'人</span></div>';
+        detailRows += '<div class="ev-revenue-row" style="font-size:10px;color:#c8824f"><span class="lbl">プラン外・手入力 '+unspecified+'人</span><span class="val">¥'+unmatchedYen.toLocaleString()+'</span></div>';
       }
       var actualInputHtml = isPast ?
         '<div class="ev-revenue-actual" style="margin-top:8px"><input type="number" id="ev-actual-'+ev.id+'" value="'+actual+'" placeholder="実際の合計額（円）"><button onclick="saveActualRevenue(\''+ev.id+'\')">実績を保存</button></div>' : '';
@@ -10572,6 +10718,58 @@ mikke.ruu2025@gmail.com`,
       if(btn) btn.textContent = isOpen ? '表示する' : '閉じる';
     }
 
+    // ── 会場の下見写真（管理者用・公開されない。extra.venuePhotos に Storage URL を保存）──
+    function buildVenuePhotosAdminHtml(ev){
+      var photos = Array.isArray(ev.venuePhotos) ? ev.venuePhotos : [];
+      var cells = photos.map(function(src, i){
+        return '<div class="album-photo-cell">'+
+          '<img src="'+src+'" alt="下見写真" onclick="window.open(\''+src+'\',\'_blank\')">'+
+          '<button class="photo-del" type="button" onclick="removeVenuePhoto(\''+ev.id+'\','+i+')">×</button>'+
+        '</div>';
+      }).join('');
+      return '<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px">'+
+        '<p style="margin:0 0 6px;font-size:11px;font-weight:900;color:var(--sub)">会場の下見写真（管理用・公開ページには出ません）</p>'+
+        '<div class="album-photo-grid" style="margin-top:4px">'+cells+
+          '<label class="album-add-photos" style="margin:0">'+
+            '<span><svg class="icon"><use href="#i-camera"/></svg><br>写真を追加</span>'+
+            '<input type="file" accept="image/*" multiple style="display:none" onchange="addVenuePhotos(\''+ev.id+'\',this)">'+
+          '</label>'+
+        '</div>'+
+      '</div>';
+    }
+    async function addVenuePhotos(evId, input){
+      var ev = (EVENTS||[]).find(function(e){return e.id===evId;});
+      if(!ev || !input || !input.files || !input.files.length) return;
+      var files = Array.from(input.files);
+      input.value='';
+      showToast('下見写真をアップロード中…（'+files.length+'枚）');
+      ev.venuePhotos = Array.isArray(ev.venuePhotos) ? ev.venuePhotos : [];
+      for(var i=0;i<files.length;i++){
+        var f = files[i];
+        var url = null;
+        try{
+          var path = 'events/venue-'+(ev.supabaseId||ev.id)+'-'+Date.now()+'-'+i+'.jpg';
+          url = await uploadFileToStorage(path, f);
+        }catch(e){}
+        if(!url && typeof resizeImageToDataURL==='function'){
+          // Storage失敗時は圧縮data-URLで保存（クラウド保存自体はextra経由で可能）
+          url = await resizeImageToDataURL(f, 1200, 0.8);
+        }
+        if(url) ev.venuePhotos.push(url);
+      }
+      var saveRes = await saveEventToSupabase(ev);
+      if(saveRes!==true){ showToast('⚠ 下見写真のクラウド保存に失敗：'+saveRes,'warn'); }
+      else { showToast('下見写真を保存しました','success'); }
+      renderEventList();
+    }
+    async function removeVenuePhoto(evId, idx){
+      var ev = (EVENTS||[]).find(function(e){return e.id===evId;});
+      if(!ev || !Array.isArray(ev.venuePhotos)) return;
+      ev.venuePhotos.splice(idx,1);
+      var saveRes = await saveEventToSupabase(ev);
+      if(saveRes!==true){ showToast('⚠ クラウド保存に失敗：'+saveRes,'warn'); }
+      renderEventList();
+    }
     function buildEventListCard(ev){
       var s = getEventEffectiveStatus(ev);
       var badge = getEventStatusBadge(ev);
@@ -10626,17 +10824,16 @@ mikke.ruu2025@gmail.com`,
           (ev.zoomPass?' / Pass: '+h(ev.zoomPass):'')
         ));
       }
-      var adminInfoHtml = '';
-      if(adminRows.length || memoHtml){
-        adminInfoHtml =
-          '<p class="ev-section-title"><svg><use href="#i-settings"/></svg>管理者のみ'+
-            '<button type="button" style="margin-left:auto;font-size:10px;font-weight:900;color:var(--sub);background:none;border:1px solid var(--line);border-radius:99px;padding:2px 10px;cursor:pointer" onclick="toggleAdminInfoBlock(\'ev-adm-'+ev.id+'\',this)">表示する</button>'+
-          '</p>'+
-          '<div id="ev-adm-'+ev.id+'" style="display:none">'+
-            (adminRows.length ? '<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px">'+adminRows.join('')+'</div>' : '')+
-            memoHtml+
-          '</div>';
-      }
+      var venuePhotosHtml = buildVenuePhotosAdminHtml(ev);
+      var adminInfoHtml =
+        '<p class="ev-section-title"><svg><use href="#i-settings"/></svg>管理者のみ'+
+          '<button type="button" style="margin-left:auto;font-size:10px;font-weight:900;color:var(--sub);background:none;border:1px solid var(--line);border-radius:99px;padding:2px 10px;cursor:pointer" onclick="toggleAdminInfoBlock(\'ev-adm-'+ev.id+'\',this)">表示する</button>'+
+        '</p>'+
+        '<div id="ev-adm-'+ev.id+'" style="display:none">'+
+          (adminRows.length ? '<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px">'+adminRows.join('')+'</div>' : '')+
+          venuePhotosHtml+
+          memoHtml+
+        '</div>';
 
       // 出店者/参加申込者セクション
       var exhibitorSection =
@@ -10681,6 +10878,7 @@ mikke.ruu2025@gmail.com`,
               '<button class="full" style="background:#fff;border:1px solid #ffb800;color:#c8924a" onclick="openSurveyResultsSheet(\''+ev.id+'\')">⭐ アンケート結果を見る（来場者'+getEventSurveys(ev.id,"visitor").length+'/出店者'+getEventSurveys(ev.id,"exhibitor").length+'件）</button>' : '')+
             (s==='upcoming' || s==='draft' ?
               '<button class="full" style="background:#fff;border:1px solid var(--ruu);color:var(--ruu)" onclick="openEventNoticeFromList(\''+ev.id+'\')">'+noticeTargetLabel+'</button>' : '')+
+            '<button class="full" style="background:#fff;border:1px solid #57cdd1;color:#1f9ca0" onclick="copyEventShareUrl(\''+ev.id+'\')">📋 このイベントのURLをコピー（LINE等で共有）</button>'+
             '<button class="edit" onclick="openEventEditSheet(\''+ev.id+'\')">編集</button>'+
             '<button class="del" onclick="deleteEvent(\''+ev.id+'\')">削除</button>'+
             '<button class="full" style="background:#fff;border:1px solid var(--line);color:var(--ink)" onclick="duplicateEvent(\''+ev.id+'\')">このイベントを元に新規作成</button>'+
@@ -11932,13 +12130,24 @@ mikke.ruu2025@gmail.com`,
         if(fileInput) fileInput.value='';
         renderAlbums(); renderHomeAlbums(); renderAdminAlbums();
         showToast('アルバムを保存しました（'+photos.length+'枚）','success');
-        // Supabase 保存
+        // Supabase 保存（失敗時は明示的に警告。失敗するとリロードで消えるため）
         saveAlbumToSupabase(album).then(function(supabaseId){
-          if(!supabaseId) return;
+          if(!supabaseId){
+            if(typeof getSupabaseClient==='function' && getSupabaseClient()){
+              showToast('⚠ アルバムのクラウド保存に失敗しました。管理者ログインを確認してください（このままだとリロードで消えます）','warn');
+            }
+            return;
+          }
           album.supabaseId = supabaseId;
           var coverPhoto = photos.find(function(p){return p.id===album.cover;});
           if(coverPhoto) updateAlbumMetaInSupabase(supabaseId, undefined, undefined, coverPhoto.src);
-          return saveAlbumPhotosToSupabase(supabaseId, photos);
+          return saveAlbumPhotosToSupabase(supabaseId, photos).then(function(ok){
+            if(ok===false && photos.length){
+              showToast('⚠ アルバム写真のクラウド保存に失敗しました（リロードで消える可能性があります）','warn');
+            } else {
+              showToast('アルバムをクラウドに保存しました（他の端末にも反映）','success');
+            }
+          });
         });
       });
     }
@@ -12154,11 +12363,11 @@ mikke.ruu2025@gmail.com`,
         else appsSel.value = 'all';
       }
 
-      // お知らせ送信先：全イベント（バザール・イベント両方に送れる）
+      // お知らせ送信先：バザールのみ（バザール出店者向けにしかお知らせは送らない）
       var noticeSel = document.getElementById('notice-event');
       if(noticeSel){
         var noticeCurrent = noticeSel.value;
-        var noticeEvents = sorted.filter(function(e){return e.status!=='draft';});
+        var noticeEvents = sorted.filter(function(e){return e.status!=='draft' && !isParticipantOnlyEvent(e);});
         noticeSel.innerHTML = noticeEvents.map(function(e){
           var kindTag = e.kind==='イベント' ? ' [参加]' : '';
           return '<option value="'+e.id+'">'+getEventDisplayNameById(e.id, false)+kindTag+'</option>';
