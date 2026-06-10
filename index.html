@@ -2141,7 +2141,19 @@
       try{
         var current = await sb.auth.getSession();
         var session2 = current && current.data && current.data.session;
-        if(session2) await syncProfileFromSupabaseSession(session2);
+        if(session2){
+          await syncProfileFromSupabaseSession(session2);
+        } else if(CURRENT_USER_EMAIL || CURRENT_USER_ID || CURRENT_USER_ROLE==='admin'){
+          // セッションが切れているのにlocalStorageの旧ログイン情報が残っている「ゾンビログイン」を解消。
+          // これを放置するとマイページが「まだ申込はありません」のまま固定され、再ログイン導線も出ない。
+          CURRENT_USER_EMAIL = '';
+          CURRENT_USER_ID = '';
+          CURRENT_USER_ROLE = 'general';
+          CURRENT_USER_EVENTS = {};
+          markStateDirty();
+          saveAppState();
+          if(typeof renderMypageEventCards==='function') renderMypageEventCards();
+        }
       }catch(e){}
       return false;
     }
@@ -2515,6 +2527,20 @@
           event_id:       ev && ev.supabaseId ? ev.supabaseId : null,
           cover_photo_url: ''
         };
+        // まずRPC（admin_create_album・SECURITY DEFINER）を試し、未デプロイなら直接INSERTにフォールバック
+        try{
+          var rpcRes = await sb.rpc('admin_create_album', {
+            p_title: payload.title, p_subtitle: payload.subtitle,
+            p_type: payload.type, p_event_id: payload.event_id
+          });
+          if(!rpcRes.error && rpcRes.data){
+            window.__lastAlbumSaveError = '';
+            return rpcRes.data;
+          }
+          if(rpcRes.error && !/function|schema cache/i.test(rpcRes.error.message||'')) throw rpcRes.error;
+        }catch(rpcErr){
+          if(!/function|schema cache/i.test((rpcErr&&rpcErr.message)||'')) throw rpcErr;
+        }
         var res = await sb.from('albums').insert(payload).select('id').single();
         if(res.error) throw res.error;
         window.__lastAlbumSaveError = '';
@@ -2550,6 +2576,19 @@
           return {album_id: albumSupabaseId, url: p.src, photo_type: p.type||'image', sort_order: i};
         }).filter(function(r){return !!r.url;});
         if(!rows.length) return false;
+        // RPC（admin_add_album_photo）優先、未デプロイなら直接INSERT
+        var rpcWorked = true;
+        for(var ri=0; ri<rows.length; ri++){
+          var pr = await sb.rpc('admin_add_album_photo', {
+            p_album_id: rows[ri].album_id, p_url: rows[ri].url,
+            p_photo_type: rows[ri].photo_type, p_sort_order: rows[ri].sort_order
+          });
+          if(pr.error){
+            if(/function|schema cache/i.test(pr.error.message||'')){ rpcWorked = false; break; }
+            throw pr.error;
+          }
+        }
+        if(rpcWorked) return true;
         var res = await sb.from('album_photos').insert(rows);
         if(res.error) throw res.error;
         return true;
@@ -5106,6 +5145,16 @@
         if(quickFilter && quickFilter.type==='request-only'){
           showQuick = !!String(card.dataset.adminrequest||'').trim();
         }
+        else if(quickFilter && quickFilter.type==='feeplan'){
+          // 売上内訳の行から「このプランの出店者だけ」を表示
+          var fpEv = (EVENTS||[]).find(function(e){return e.id===(quickFilter.event||'');});
+          var fpOpts = (fpEv && fpEv.feeOptions) || [];
+          if(quickFilter.value==='other'){
+            showQuick = !fpOpts.some(function(o){return o.id===card.dataset.feeplan;});
+          } else {
+            showQuick = card.dataset.feeplan===quickFilter.value;
+          }
+        }
         var show=showStatus&&showEvent&&showDrop&&showSearch&&showKind&&showQuick;
         card.style.display=show?'':'none';
         if(!show) card.classList.remove('open');
@@ -5592,6 +5641,25 @@
       var searchEl=document.getElementById('apps-search');
       if(searchEl) searchEl.value='';
       filterAppsCombined();
+    }
+    // 売上内訳の行 → そのプランの確定出店者一覧を開く（planId='other' はプラン外・手入力分）
+    function openEventAppsByFeePlan(evId, planId){
+      __appsKindMode = 'bazaar';
+      openAdminPanelForce('admin-applications');
+      setTimeout(function(){
+        var eventSel = document.getElementById('apps-event-filter');
+        if(eventSel) eventSel.value = evId;
+        var drop = document.getElementById('apps-drop-filter');
+        if(drop) drop.value = 'all';
+        var searchEl = document.getElementById('apps-search');
+        if(searchEl) searchEl.value = '';
+        // 売上集計の対象＝確定者なのでステータスは確定で絞る
+        document.querySelectorAll('#admin-applications .app-status-chip').forEach(function(b){
+          b.classList.toggle('active', b.dataset.as==='confirmed');
+        });
+        __appsSummaryQuickFilter = {type:'feeplan', value:planId, event:evId};
+        filterAppsCombined();
+      }, 60);
     }
     function openEventAppsFromSummary(evId, metricKey){
       var ev = (EVENTS||[]).find(function(x){return x.id===evId;});
@@ -8306,12 +8374,11 @@ mikke.ruu2025@gmail.com`,
       if(partyEl) partyEl.textContent = '¥'+partyTotal.toLocaleString();
     }
 
-    // ダッシュボードから現在選択中のイベント詳細を開く（編集シートで直接表示）
+    // ダッシュボードから現在選択中のバザールの詳細カード（イベント一覧パネル内）を開く
     function openSelectedEventInList(){
       var ev = getCurrentDashboardEvent();
       if(!ev || !ev.key){showToast('対象バザールがありません','warn');return;}
-      closeAdminPanel();
-      if(typeof openEventEditSheet==='function') openEventEditSheet(ev.key);
+      openEventInListById(ev.key);
     }
     function openEventInListById(eventId){
       if(!eventId){showToast('対象イベントがありません','warn');return;}
@@ -10766,12 +10833,12 @@ mikke.ruu2025@gmail.com`,
       var unspecified = unmatchedApps.length;
       var label = isPast ? '実績売上（出店料）' : '見込み売上（出店料）';
 
-      // 詳細行
+      // 詳細行（タップでそのプランの確定出店者一覧へ）
       var detailRows = opts.length ? planSummary.map(function(ps){
-        return '<div class="ev-revenue-row"><span class="lbl">'+ps.opt.label+' ¥'+(parseInt(ps.opt.yen,10)||0).toLocaleString()+' × '+ps.count+'人</span><span class="val">¥'+ps.sub.toLocaleString()+'</span></div>';
+        return '<div class="ev-revenue-row" style="cursor:pointer" onclick="openEventAppsByFeePlan(\''+ev.id+'\',\''+ps.opt.id+'\')"><span class="lbl">'+ps.opt.label+' ¥'+(parseInt(ps.opt.yen,10)||0).toLocaleString()+' × '+ps.count+'人 <span style="color:var(--ruu);font-size:9px;font-weight:900">一覧→</span></span><span class="val">¥'+ps.sub.toLocaleString()+'</span></div>';
       }).join('') : '<div class="ev-revenue-row"><span class="lbl">出店料プラン未設定</span></div>';
       if(unspecified>0){
-        detailRows += '<div class="ev-revenue-row" style="font-size:10px;color:#c8824f"><span class="lbl">プラン外・手入力 '+unspecified+'人</span><span class="val">¥'+unmatchedYen.toLocaleString()+'</span></div>';
+        detailRows += '<div class="ev-revenue-row" style="font-size:10px;color:#c8824f;cursor:pointer" onclick="openEventAppsByFeePlan(\''+ev.id+'\',\'other\')"><span class="lbl">プラン外・手入力 '+unspecified+'人 <span style="color:var(--ruu);font-size:9px;font-weight:900">一覧→</span></span><span class="val">¥'+unmatchedYen.toLocaleString()+'</span></div>';
       }
       var actualInputHtml = isPast ?
         '<div class="ev-revenue-actual" style="margin-top:8px"><input type="number" id="ev-actual-'+ev.id+'" value="'+actual+'" placeholder="実際の合計額（円）"><button onclick="saveActualRevenue(\''+ev.id+'\')">実績を保存</button></div>' : '';
@@ -10801,12 +10868,11 @@ mikke.ruu2025@gmail.com`,
       }
       var exhibitorPartyCount = apps.filter(function(a){return a.party==='yes'}).length;
       var partyTotal = partyFee * (exhibitorPartyCount + generalPartyCount);
-      var generalInputHtml = '<div class="ev-revenue-actual" style="margin-top:6px"><input type="number" id="ev-general-'+ev.id+'" value="'+generalPartyCount+'" placeholder="一般参加者数"><button onclick="saveGeneralCount(\''+ev.id+'\')">一般参加者数を保存</button></div>';
+      // 一般参加者数は交流会申込（Supabase）から自動集計されるため、手入力欄は廃止
       return '<div class="ev-revenue" style="margin-top:4px;background:#f0fdf8;border-color:#cce7d8">'+
         '<div class="ev-revenue-row"><span class="lbl" style="color:#4a9e87">参加費 ¥'+partyFee.toLocaleString()+' × 出店者 '+exhibitorPartyCount+'人</span><span class="val">¥'+(partyFee*exhibitorPartyCount).toLocaleString()+'</span></div>'+
         '<div class="ev-revenue-row"><span class="lbl" style="color:#4a9e87">参加費 ¥'+partyFee.toLocaleString()+' × 一般 '+generalPartyCount+'人</span><span class="val">¥'+(partyFee*generalPartyCount).toLocaleString()+'</span></div>'+
         '<div class="ev-revenue-row total" style="margin-top:6px;border-color:#cce7d8"><span class="lbl">交流会 合計</span><span class="val">¥'+partyTotal.toLocaleString()+'</span></div>'+
-        generalInputHtml+
       '</div>';
     }
     function saveGeneralCount(evId){
@@ -11057,10 +11123,9 @@ mikke.ruu2025@gmail.com`,
           memoHtml+
         '</div>';
 
-      // 出店者/参加申込者セクション
+      // 出店者/参加申込者セクション（チップ一覧は廃止・一覧ボタンに集約）
       var exhibitorSection =
         '<p class="ev-section-title"><svg><use href="#i-user"/></svg>'+ownerLabel+'（'+exhibitors.length+'人）'+(s!=='past'?'<span style="margin-left:auto;font-size:9px;color:var(--sub);font-weight:600;text-transform:none">'+ownerNote+'</span>':'')+'</p>'+
-        '<div class="ev-exhibitor-list">'+exhibitorHtml+'</div>'+
         '<button type="button" class="full" style="margin-top:8px;background:#fff;border:1px solid var(--ruu);color:var(--ruu)" onclick="openEventAppsFromSummary(\''+ev.id+'\',\'all\')">'+ownerLabel+'一覧を見る</button>';
 
       // 交流会セクション（バザールかつ交流会ありの場合）
