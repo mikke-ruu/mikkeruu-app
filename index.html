@@ -11101,9 +11101,10 @@ mikke.ruu2025@gmail.com`,
     function buildVenuePhotosAdminHtml(ev){
       var photos = Array.isArray(ev.venuePhotos) ? ev.venuePhotos : [];
       var cells = photos.map(function(src, i){
-        return '<div class="album-photo-cell">'+
-          '<img src="'+src+'" alt="下見写真" onclick="openVenuePhotoLightbox(\''+ev.id+'\','+i+')">'+
-          '<button class="photo-del" type="button" onclick="removeVenuePhoto(\''+ev.id+'\','+i+')">×</button>'+
+        var media = buildMediaThumb(src);
+        var vmark = srcIsVideo(src) ? '<span class="video-mark">▶</span>' : '';
+        return '<div class="album-photo-cell" onclick="openVenuePhotoLightbox(\''+ev.id+'\','+i+')">'+media+vmark+
+          '<button class="photo-del" type="button" onclick="event.stopPropagation();removeVenuePhoto(\''+ev.id+'\','+i+')">×</button>'+
         '</div>';
       }).join('');
       return '<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px">'+
@@ -11111,7 +11112,7 @@ mikke.ruu2025@gmail.com`,
         '<div class="album-photo-grid" style="margin-top:4px">'+cells+
           '<label class="album-add-photos" style="margin:0">'+
             '<span><svg class="icon"><use href="#i-camera"/></svg><br>写真を追加</span>'+
-            '<input type="file" accept="image/*" multiple style="display:none" onchange="addVenuePhotos(\''+ev.id+'\',this)">'+
+            '<input type="file" accept="image/*,video/*" multiple style="display:none" onchange="addVenuePhotos(\''+ev.id+'\',this)">'+
           '</label>'+
         '</div>'+
       '</div>';
@@ -11121,31 +11122,37 @@ mikke.ruu2025@gmail.com`,
       if(!ev || !input || !input.files || !input.files.length) return;
       var files = Array.from(input.files);
       input.value='';
-      showToast('下見写真をアップロード中…（'+files.length+'枚）');
+      showToast('下見をアップロード中…（'+files.length+'件）');
       ev.venuePhotos = Array.isArray(ev.venuePhotos) ? ev.venuePhotos : [];
+      var rejected = 0;
       for(var i=0;i<files.length;i++){
         var f = files[i];
+        var isVid = (f.type||'').indexOf('video')===0;
+        if(isVid && f.size > MAX_VIDEO_UPLOAD_MB*1024*1024){ rejected++; continue; }
+        var ext = isVid ? (((f.type||'video/mp4').split('/')[1])||'mp4') : 'jpg';
         var url = null;
         try{
-          var path = 'events/venue-'+(ev.supabaseId||ev.id)+'-'+Date.now()+'-'+i+'.jpg';
+          var path = 'events/venue-'+(ev.supabaseId||ev.id)+'-'+Date.now()+'-'+i+'.'+ext;
           url = await uploadFileToStorage(path, f);
         }catch(e){}
-        if(!url && typeof resizeImageToDataURL==='function'){
-          // Storage失敗時は圧縮data-URLで保存（クラウド保存自体はextra経由で可能）
+        if(!url && !isVid && typeof resizeImageToDataURL==='function'){
+          // 画像のStorage失敗時のみ圧縮data-URLフォールバック（動画は巨大化するためしない）
           url = await resizeImageToDataURL(f, 1200, 0.8);
         }
-        if(url) ev.venuePhotos.push(url);
+        if(!url){ rejected++; continue; }
+        ev.venuePhotos.push(url);
       }
       var saveRes = await saveEventToSupabase(ev);
-      if(saveRes!==true){ showToast('⚠ 下見写真のクラウド保存に失敗：'+saveRes,'warn'); }
-      else { showToast('下見写真を保存しました','success'); }
+      if(saveRes!==true){ showToast('⚠ 下見のクラウド保存に失敗：'+saveRes,'warn'); }
+      else if(rejected>0){ showToast('保存しました。'+rejected+'件は'+MAX_VIDEO_UPLOAD_MB+'MB超のため見送りました（大きい動画はYouTube等のURLを検討）','warn'); }
+      else { showToast('下見を保存しました','success'); }
       renderEventList();
     }
     // 下見写真をライトボックスで拡大表示
     function openVenuePhotoLightbox(evId, idx){
       var ev = (EVENTS||[]).find(function(e){return e.id===evId;});
       if(!ev || !Array.isArray(ev.venuePhotos) || !ev.venuePhotos.length) return;
-      LIGHTBOX_LIST = ev.venuePhotos.map(function(src){return {type:'image', src:src};});
+      LIGHTBOX_LIST = ev.venuePhotos.map(function(src){return {type: srcIsVideo(src)?'video':'image', src:src};});
       LIGHTBOX_INDEX = Math.max(0, Math.min(idx||0, LIGHTBOX_LIST.length-1));
       renderLightbox();
       document.getElementById('lightbox').classList.add('open');
@@ -12375,33 +12382,72 @@ mikke.ruu2025@gmail.com`,
 
     // ファイルを Storage にアップロードして写真オブジェクト配列に変換
     // albumId: Storage パスの一部に使う（ローカル ID または任意の文字列）
+    // ── 動画・画像メディア共通ヘルパー（URLで種別判定・DB変更不要）──
+    var MAX_VIDEO_UPLOAD_MB = 20;
+    function toEmbedUrl(url){
+      url = url||''; var m;
+      if((m = url.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([\w-]{11})/))) return 'https://www.youtube.com/embed/'+m[1];
+      if((m = url.match(/vimeo\.com\/(\d+)/))) return 'https://player.vimeo.com/video/'+m[1];
+      return '';
+    }
+    function srcIsVideo(src){ src = src||''; return !!toEmbedUrl(src) || /\.(mp4|webm|mov|m4v|ogv)(\?|#|$)/i.test(src); }
+    function buildMediaHtml(src, opt){
+      opt = opt||{}; src = src||'';
+      var em = toEmbedUrl(src);
+      if(em) return '<iframe src="'+em+(opt.autoplay?'?autoplay=1':'')+'" allow="autoplay;encrypted-media;picture-in-picture" allowfullscreen loading="lazy" style="width:90vw;max-width:900px;height:50.6vw;max-height:506px;border:0;border-radius:10px;background:#000"></iframe>';
+      if(srcIsVideo(src)) return '<video src="'+src+'"'+(opt.controls?' controls':'')+(opt.autoplay?' autoplay playsinline':'')+'></video>';
+      return '<img src="'+src+'" alt="">';
+    }
+    function buildMediaThumb(src){
+      src = src||'';
+      var yt = src.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([\w-]{11})/);
+      if(yt) return '<img src="https://img.youtube.com/vi/'+yt[1]+'/hqdefault.jpg" alt="">';
+      if(toEmbedUrl(src)) return '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#2d2638;color:#fff;font-size:26px">&#9654;</div>';
+      if(srcIsVideo(src)) return '<video src="'+src+'" muted playsinline preload="metadata" style="width:100%;height:100%;object-fit:cover"></video>';
+      return '<img src="'+src+'" alt="">';
+    }
+    function mediaCoverUrl(src){
+      src = src||'';
+      var yt = src.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([\w-]{11})/);
+      if(yt) return 'https://img.youtube.com/vi/'+yt[1]+'/hqdefault.jpg';
+      if(srcIsVideo(src)) return '';
+      return src;
+    }
     function filesToPhotosWithStorage(albumId, files, doneCb){
       var fileArr = files ? Array.from(files) : [];
       if(!fileArr.length){ doneCb([]); return; }
       var sb = getSupabaseClient();
+      var rejected = 0;
       Promise.all(fileArr.map(function(file){
         var photoId = uid2();
         var isVideo = (file.type||'').indexOf('video') === 0;
-        if(!isVideo && sb){
-          var ext = (file.type||'image/jpeg').split('/')[1] || 'jpg';
+        var ext = (file.type||'image/jpeg').split('/')[1] || (isVideo?'mp4':'jpg');
+        if(isVideo){
+          // 動画: サイズ上限チェック → Storage へアップ（巨大data-URL直書きはしない）
+          if(file.size > MAX_VIDEO_UPLOAD_MB*1024*1024){ rejected++; return Promise.resolve(null); }
+          if(!sb){ rejected++; return Promise.resolve(null); }
+          var vpath = 'albums/'+albumId+'/'+photoId+'.'+ext;
+          return uploadFileToStorage(vpath, file).then(function(url){
+            if(url) return {id:photoId, src:url, type:'video'};
+            rejected++; return null;
+          });
+        }
+        if(sb){
           var path = 'albums/'+albumId+'/'+photoId+'.'+ext;
           return uploadFileToStorage(path, file).then(function(url){
             if(url) return {id:photoId, src:url, type:'image'};
-            // Storage 失敗 → 圧縮data-URLフォールバック（生データだと巨大すぎてDB保存も失敗するため）
             return resizeImageToDataURL(file, 1200, 0.8).then(function(dataUrl){
               return {id:photoId, src:dataUrl||'', type:'image'};
             });
           });
         }
-        // 動画 or Supabase 未設定: data-URL
-        return new Promise(function(resolve){
-          var fr2 = new FileReader();
-          fr2.onload = function(e){ resolve({id:photoId, src:e.target.result||'', type:isVideo?'video':'image'}); };
-          fr2.onerror = function(){ resolve({id:photoId, src:'', type:isVideo?'video':'image'}); };
-          fr2.readAsDataURL(file);
+        // 画像 + Supabase未設定: 圧縮data-URL
+        return resizeImageToDataURL(file, 1200, 0.8).then(function(dataUrl){
+          return {id:photoId, src:dataUrl||'', type:'image'};
         });
       })).then(function(photos){
-        doneCb(photos.filter(function(p){return !!p.src;}));
+        if(rejected>0) showToast('動画'+rejected+'件は'+MAX_VIDEO_UPLOAD_MB+'MB超のため見送りました。大きい動画は「動画URLを追加」をご利用ください','warn');
+        doneCb(photos.filter(function(p){return p && !!p.src;}));
       });
     }
 
@@ -12412,9 +12458,14 @@ mikke.ruu2025@gmail.com`,
     var adminAlbumType = 'event';
 
     function getAlbumCoverSrc(a){
-      if(!a.photos || !a.photos.length) return 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22800%22 height=%22600%22%3E%3Crect width=%22800%22 height=%22600%22 fill=%22%23f0edf4%22/%3E%3C/svg%3E';
-      var p = a.photos.find(function(x){return x.id===a.cover}) || a.photos[0];
-      return p.src;
+      var PH = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22800%22 height=%22600%22%3E%3Crect width=%22800%22 height=%22600%22 fill=%22%23f0edf4%22/%3E%3C/svg%3E';
+      var ph = a.photos || [];
+      if(!ph.length) return PH;
+      var p = ph.find(function(x){return x.id===a.cover}) || ph[0];
+      var u = mediaCoverUrl(p.src);
+      if(u) return u;
+      var img = ph.find(function(x){return !srcIsVideo(x.src);});
+      return img ? img.src : PH;
     }
 
     function buildAlbumCard(a){
@@ -12553,6 +12604,7 @@ mikke.ruu2025@gmail.com`,
         '<button class="primary" onclick="saveAlbumMeta(\''+id+'\')" style="min-height:38px;border-radius:14px;border:none;background:var(--ruu);color:#fff;font-size:13px;font-weight:900;cursor:pointer">タイトルを保存</button>'+
         '<p class="filter-label" style="margin-top:14px">写真・動画（'+(a.photos||[]).length+'枚）</p>'+
         '<div class="album-photo-grid" id="aam-photo-grid">'+photoGridHtml+'</div>'+
+        '<button class="secondary" type="button" style="margin-top:8px;width:100%" onclick="addVideoUrlToAlbum(\''+id+'\')">＋ 動画URLを追加（YouTube等・容量ゼロ）</button>'+
         '<input type="file" id="aam-files" multiple accept="image/*,video/*" style="display:none" onchange="addPhotosToAlbum(\''+id+'\',this)">'+
         '<div class="album-delete-card">'+
           '<span class="lbl">⚠ このアルバムごと削除します</span>'+
@@ -12566,8 +12618,8 @@ mikke.ruu2025@gmail.com`,
     function renderAdminPhotoGrid(a){
       var photos = a.photos || [];
       var html = photos.map(function(p){
-        var isVideo = p.type==='video';
-        var media = isVideo ? '<video src="'+p.src+'"></video>' : '<img src="'+p.src+'" alt="">';
+        var isVideo = p.type==='video' || srcIsVideo(p.src);
+        var media = buildMediaThumb(p.src);
         var coverMark = (p.id===a.cover) ? '<span class="cover-mark">カバー</span>' : '';
         var setCoverBtn = (p.id!==a.cover) ? '<button class="set-cover" onclick="event.stopPropagation();setAlbumCover(\''+a.id+'\',\''+p.id+'\')">カバーに</button>' : '';
         var videoMark = isVideo ? '<span class="video-mark">▶ 動画</span>' : '';
@@ -12616,6 +12668,23 @@ mikke.ruu2025@gmail.com`,
         // Supabase 保存
         if(a.supabaseId) saveAlbumPhotosToSupabase(a.supabaseId, photos);
       });
+    }
+    function addVideoUrlToAlbum(albumId){
+      var a = ALBUMS.find(function(x){return x.id===albumId});
+      if(!a) return;
+      var url = prompt('動画のURL（YouTube・Vimeo・mp4などの動画URL）を貼り付けてください');
+      if(url===null) return;
+      url = (url||'').trim();
+      if(!url) return;
+      if(!/^https?:\/\//i.test(url)){ showToast('http(s)で始まるURLを入力してください','warn'); return; }
+      if(!srcIsVideo(url)){ showToast('YouTube/Vimeo か mp4等の動画URLを入力してください','warn'); return; }
+      var item = {id:uid2(), src:url, type:'video'};
+      a.photos = (a.photos||[]).concat([item]);
+      if(!a.cover && a.photos.length) a.cover = a.photos[0].id;
+      refreshAdminPhotoGrid(albumId);
+      renderAlbums(); renderHomeAlbums(); renderAdminAlbums();
+      showToast('動画URLを追加しました','success');
+      if(a.supabaseId) saveAlbumPhotosToSupabase(a.supabaseId, [item]);
     }
     function removePhoto(albumId, photoId){
       var a = ALBUMS.find(function(x){return x.id===albumId});
@@ -12679,8 +12748,8 @@ mikke.ruu2025@gmail.com`,
       var typeLabel = a.type==='event'?'過去イベント':'自由アルバム';
       var photos = a.photos || [];
       var photoHtml = photos.length ? photos.map(function(p, i){
-        var media = p.type==='video' ? '<video src="'+p.src+'"></video>' : '<img src="'+p.src+'" alt="">';
-        var videoMark = p.type==='video' ? '<span class="video-mark">▶</span>' : '';
+        var media = buildMediaThumb(p.src);
+        var videoMark = (p.type==='video' || srcIsVideo(p.src)) ? '<span class="video-mark">▶</span>' : '';
         return '<div class="album-photo-cell" onclick="openLightbox(\''+a.id+'\','+i+')">'+media+videoMark+'</div>';
       }).join('') : '<p class="helper" style="grid-column:1/-1;text-align:center;padding:24px 0">写真はまだありません</p>';
 
@@ -12706,9 +12775,7 @@ mikke.ruu2025@gmail.com`,
       var p = LIGHTBOX_LIST[LIGHTBOX_INDEX];
       if(!p) return;
       var content = document.getElementById('lightbox-content');
-      content.innerHTML = p.type==='video'
-        ? '<video src="'+p.src+'" controls autoplay></video>'
-        : '<img src="'+p.src+'" alt="">';
+      content.innerHTML = buildMediaHtml(p.src, {controls:true, autoplay:true});
       var counter = document.getElementById('lightbox-counter');
       counter.textContent = (LIGHTBOX_INDEX+1)+' / '+LIGHTBOX_LIST.length;
       // ナビ表示制御
