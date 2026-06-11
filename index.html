@@ -4255,8 +4255,42 @@
         }
       };
     }
+    // data-URL をCanvasで圧縮してBlob化（Storageアップロード用）
+    function compressDataUrlToBlob(dataUrl, maxPx, quality){
+      return new Promise(function(resolve){
+        try{
+          var img = new Image();
+          img.onload = function(){
+            var w=img.width, h=img.height;
+            if(w>maxPx || h>maxPx){ if(w>=h){ h=Math.round(h*maxPx/w); w=maxPx; } else { w=Math.round(w*maxPx/h); h=maxPx; } }
+            var c=document.createElement('canvas'); c.width=w; c.height=h;
+            c.getContext('2d').drawImage(img,0,0,w,h);
+            c.toBlob(function(b){ resolve(b); }, 'image/jpeg', quality||0.82);
+          };
+          img.onerror = function(){ resolve(null); };
+          img.src = dataUrl;
+        }catch(e){ resolve(null); }
+      });
+    }
     async function saveApplicationToSupabase(data, localAppId){
       var sb = getSupabaseClient();
+      // アイキャッチが data-URL の場合は Storage にアップしてURL化（DB肥大・毎回の通信量を削減）
+      if(sb && data && typeof data.eyecatch==='string' && data.eyecatch.indexOf('data:')===0){
+        try{
+          var evObj = (EVENTS||[]).find(function(e){return e.id===data.eventId;});
+          var evKey = (evObj && evObj.supabaseId) || data.eventId || 'x';
+          var blob = await compressDataUrlToBlob(data.eyecatch, 900, 0.82);
+          if(blob){
+            var upPath = 'apply-eyecatch/'+evKey+'-'+Date.now()+'.jpg';
+            var upUrl = await uploadFileToStorage(upPath, blob);
+            if(upUrl){
+              data.eyecatch = upUrl;
+              var la = (APPLICATIONS||[]).find(function(a){return a.id===localAppId;});
+              if(la){ la.eyecatchImage = upUrl; la.eyecatch = '1'; }
+            }
+          }
+        }catch(e){ /* 失敗時は data-URL のまま保存（後方互換・SQL未実行時の安全策） */ }
+      }
       var payload = buildSupabaseApplicationPayload(data);
       if(!sb || !payload) return false;
       try{
@@ -12944,23 +12978,30 @@ mikke.ruu2025@gmail.com`,
       tryLoginByUrlToken();
       initSupabaseAuthFromUrl()
         .then(loadPublicEventsFromSupabase)
-        .then(function(){return loadPublicNoticesFromSupabase();})
-        .then(function(){return loadCurrentUserApplicationsFromSupabase({silent:true});})
         .then(function(){
-          // マイページの初回確認完了 → ローディング表示を解除して再描画
-          MYPAGE_HYDRATING = false;
-          var act = document.querySelector('.page.active');
-          if(act && act.id === 'mypage'){ fillMypagePrivFromLatest(); renderMypageEventCards(); }
-        })
-        .then(function(){return loadCurrentUserNoticesFromSupabase({silent:true});})
-        .then(function(){return loadAdminApplicationsFromSupabase({silent:true});})
-        .then(function(){return loadAdminMailLogsFromSupabase({silent:true});})
-        .then(function(){return loadAlbumsFromSupabase();})
-        .then(function(){return loadSurveysFromSupabase();})
-        .then(function(){return loadOrgSettingsFromSupabase();})
-        .then(function(){return loadSurveyTemplatesFromSupabase();})
-        .then(function(){return loadFaqsFromSupabase();})
-        .then(function(){return loadTemplatesFromSupabase();});
+          // events 読込後は残りを並列実行（起動高速化: 旧=連続フェッチ → 新=並列）
+          var userChain = loadCurrentUserApplicationsFromSupabase({silent:true}).then(function(){
+            // マイページの初回確認完了 → ローディング表示を解除して再描画
+            MYPAGE_HYDRATING = false;
+            var act = document.querySelector('.page.active');
+            if(act && act.id === 'mypage'){ fillMypagePrivFromLatest(); renderMypageEventCards(); }
+            return loadCurrentUserNoticesFromSupabase({silent:true});
+          });
+          var adminChain = loadAdminApplicationsFromSupabase({silent:true}).then(function(){
+            return loadAdminMailLogsFromSupabase({silent:true});
+          });
+          return Promise.all([
+            loadPublicNoticesFromSupabase(),
+            userChain,
+            adminChain,
+            loadAlbumsFromSupabase(),
+            loadSurveysFromSupabase(),
+            loadOrgSettingsFromSupabase(),
+            loadSurveyTemplatesFromSupabase(),
+            loadFaqsFromSupabase(),
+            loadTemplatesFromSupabase()
+          ]);
+        });
     });
     // 即実行も保険で
     setTimeout(renderAll, 100);
