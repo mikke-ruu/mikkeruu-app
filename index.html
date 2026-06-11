@@ -1896,6 +1896,10 @@
               <textarea class="input" id="org-term-policy-event" rows="12" style="resize:vertical"></textarea>
             </label>
 
+            <p class="filter-label" style="margin-top:14px;margin-bottom:0">▼ 領収書</p>
+            <label style="font-size:11px;font-weight:900;color:var(--sub)">発行者名（屋号・住所・連絡先など。改行可）<textarea class="input" id="org-receipt-issuer" rows="3" style="resize:vertical" placeholder="例：Mikke ruu 運営"></textarea></label>
+            <p class="helper" style="font-size:10px;color:var(--sub);margin-top:-4px">＊ 申込一覧の「🧾 領収書」で発行する書類に記載されます。全端末で共通になります。</p>
+
             <p class="filter-label" style="margin-top:14px;margin-bottom:0">▼ 管理者パスワード変更</p>
             <label style="font-size:11px;font-weight:900;color:var(--sub)">現在のパスワード<input class="input" id="org-pwd-current" type="password" placeholder="••••••••" autocomplete="current-password"></label>
             <label style="font-size:11px;font-weight:900;color:var(--sub)">新しいパスワード<input class="input" id="org-pwd-new" type="password" placeholder="8文字以上推奨" autocomplete="new-password"></label>
@@ -2836,6 +2840,27 @@
         return false;
       }
     }
+    // 公開お知らせ（未ログインの来場者・別端末でもホームに表示するため anon で読む）
+    function loadPublicNoticesFromSupabase(){
+      var sb = getSupabaseClient();
+      if(!sb) return Promise.resolve(false);
+      return sb.from('notices')
+        .select('id,channel,event_id,target_user_id,target_email,title,body,image_url,created_at')
+        .eq('channel','public')
+        .order('created_at',{ascending:false})
+        .then(function(r){
+          if(r && r.error){ console.warn('Supabase public notice load', r.error); return false; }
+          (r.data||[]).map(mapSupabaseNoticeRow).forEach(function(n){
+            var existing = (NOTICES||[]).find(function(item){return item && item.id===n.id;});
+            if(existing) n.read = !!existing.read;
+            upsertById(NOTICES, n);
+          });
+          if(typeof renderHomeNotices==='function') renderHomeNotices();
+          if(typeof renderNews==='function') renderNews();
+          if(typeof updateMypageNoticeCount==='function') updateMypageNoticeCount();
+          return true;
+        });
+    }
     async function refreshSupabaseAdminRole(){
       var sb = getSupabaseClient();
       if(!sb) return false;
@@ -3250,162 +3275,6 @@
           child.style.display = needsLogin ? 'none' : '';
         });
       }
-    }
-    function seedRealTestDataOnce(){
-      if(localStorage.getItem(REAL_SEED_KEY)==='1') return;
-      var asset = function(name){ return 'seed-assets/' + name; };
-      var bazaarId = 'seed-bazaar-kinshicho-20260824';
-      var eventId = 'seed-event-koryukai-20260705';
-      var bazaarEvent = {
-        id:bazaarId,
-        kind:'バザール',
-        content:'ハンドメイド、セッション、フードが集まるバザールです。',
-        name:'Mikke bazar vol.15 錦糸町',
-        date:'2026-08-24',
-        dayOfWeek:'月',
-        startTime:'11:00',
-        endTime:'16:00',
-        venue:'Peoplewise Cafe',
-        address:'東京都墨田区太平3-2-8',
-        mapUrl:'https://www.google.com/maps/search/?api=1&query=%E6%9D%B1%E4%BA%AC%E9%83%BD%E5%A2%A8%E7%94%B0%E5%8C%BA%E5%A4%AA%E5%B9%B3%EF%BC%93%E4%B8%81%E7%9B%AE%EF%BC%92%E2%88%92%EF%BC%98',
-        feeOptions:[
-          {id:'uw', label:'UW会員', yen:3500},
-          {id:'uw-bed', label:'UW会員（ベッド等持ち込み）', yen:4500},
-          {id:'non', label:'非会員', yen:4000},
-          {id:'non-bed', label:'非会員（ベッド等持ち込み）', yen:5500}
-        ],
-        capacities:{retail:12,food:6,session:6,treatment:6},
-        capacity:30,
-        deadline:'2026-08-18',
-        eyecatchDeadline:'2026-08-14',
-        zoomDate:'2026-08-10',
-        zoomTime:'20:00',
-        zoomId:'1234567890',
-        zoomPass:'mikke15',
-        payment:'当日現金',
-        detail:'Mikke bazar vol.15のご案内です。来場者向けに当日の出店情報やイベント内容を掲載します。',
-        flyers:1,
-        photos:5,
-        coverImage:asset('event_flyer_main.png'),
-        flyerImages:[
-          asset('event_flyer_main.png'),
-          asset('event_sub_14.png'),
-          asset('event_sub_13.png'),
-          asset('event_sub_10.png'),
-          asset('event_sub_9.png')
-        ],
-        venueImages:[
-          asset('vendor_candle.jpg'),
-          asset('vendor_earring.jpeg')
-        ],
-        status:'public',
-        adminMemo:'実データ投入テスト用（必要なら削除OK）',
-        party:{
-          enabled:true,
-          title:'Mikke dinner 交流会',
-          date:'2026-08-24',
-          deadline:'2026-08-20',
-          startTime:'18:30',
-          endTime:'20:30',
-          venue:'Kitchen mikke',
-          address:'東京都墨田区太平3-2-8',
-          mapUrl:'https://www.google.com/maps/search/?api=1&query=%E6%9D%B1%E4%BA%AC%E9%83%BD%E5%A2%A8%E7%94%B0%E5%8C%BA%E5%A4%AA%E5%B9%B3%EF%BC%93%E4%B8%81%E7%9B%AE%EF%BC%92%E2%88%92%EF%BC%98',
-          fee:'1500',
-          capacity:'20',
-          payment:'当日現金',
-          audience:'出店者と一般参加どちらも受付',
-          description:'出店者さん同士の交流会です。'
-        }
-      };
-      var participantEvent = {
-        id:eventId,
-        kind:'イベント',
-        content:'交流会',
-        name:'交流会ナイト',
-        date:'2026-07-05',
-        dayOfWeek:'日',
-        startTime:'18:30',
-        endTime:'20:30',
-        venue:'Kitchen mikke',
-        address:'東京都墨田区太平3-2-8',
-        mapUrl:'https://www.google.com/maps/search/?api=1&query=%E6%9D%B1%E4%BA%AC%E9%83%BD%E5%A2%A8%E7%94%B0%E5%8C%BA%E5%A4%AA%E5%B9%B3%EF%BC%93%E4%B8%81%E7%9B%AE%EF%BC%92%E2%88%92%EF%BC%98',
-        feeOptions:[{id:'event-fee', label:'参加費', yen:3500}],
-        capacities:{retail:30,food:0,session:0,treatment:0},
-        capacity:30,
-        deadline:'2026-07-01',
-        eyecatchDeadline:'',
-        zoomDate:'',
-        zoomTime:'',
-        zoomId:'',
-        zoomPass:'',
-        payment:'当日現金',
-        detail:'出店者なしの参加募集イベントです。お気軽にご参加ください。',
-        flyers:1,
-        photos:2,
-        coverImage:asset('event_sub_14.png'),
-        flyerImages:[asset('event_sub_14.png'), asset('event_sub_13.png')],
-        venueImages:[asset('vendor_bag_gold.png')],
-        status:'public',
-        adminMemo:'実データ投入テスト用（必要なら削除OK）',
-        party:{enabled:false}
-      };
-      upsertById(EVENTS, bazaarEvent);
-      upsertById(EVENTS, participantEvent);
-
-      var seedApps = [
-        {
-          id:'seed-app-bazaar-1', person:'seed-person-b1', event:bazaarId, status:'confirmed',
-          line:'1', eyecatch:'1', eyecatchImage:asset('vendor_candle.jpg'), category:'food', party:'yes', first:'repeat',
-          personname:'山本 あかり', shopname:'akari candle', feeplan:'non', email:'seed.akari@example.com',
-          kana:'やまもと あかり', member:'non', uwid:'', achiever:'', social:'https://instagram.com/akari_candle',
-          content:'キャンドル・雑貨販売', attendeeCount:1, comment:'灯りのある暮らしを提案します。',
-          adminRequest:'電源1口を希望します。', createdAt:'2026.05.28'
-        },
-        {
-          id:'seed-app-bazaar-2', person:'seed-person-b2', event:bazaarId, status:'new',
-          line:'0', eyecatch:'1', eyecatchImage:asset('vendor_earring.jpeg'), category:'retail', party:'tbd', first:'first',
-          personname:'野田 ゆめ', shopname:'danoan', feeplan:'uw', email:'seed.danoan@example.com',
-          kana:'のだ ゆめ', member:'uw', uwid:'MKR-88167', achiever:'五味 浩', social:'https://instagram.com/danoan',
-          content:'アクセサリー販売', attendeeCount:1, comment:'ハンドメイドアクセサリーを販売します。',
-          adminRequest:'机を1台追加相談したいです。', createdAt:'2026.05.29'
-        },
-        {
-          id:'seed-app-bazaar-3', person:'seed-person-b3', event:bazaarId, status:'hold',
-          line:'0', eyecatch:'0', eyecatchImage:'', category:'session', party:'no', first:'first',
-          personname:'樋口 もも子', shopname:'Rifu', feeplan:'non-bed', email:'seed.rifu@example.com',
-          kana:'ひぐち ももこ', member:'non', uwid:'', achiever:'', social:'https://instagram.com/rifu_session',
-          content:'スピリチュアルセッション', attendeeCount:1, comment:'守護霊メッセージをお届けします。',
-          adminRequest:'半個室に近い場所希望です。', createdAt:'2026.05.30'
-        },
-        {
-          id:'seed-app-bazaar-4', person:'seed-person-b4', event:bazaarId, status:'confirmed',
-          line:'1', eyecatch:'1', eyecatchImage:asset('vendor_bag_gold.png'), category:'treatment', party:'yes', first:'repeat',
-          personname:'佐藤 かな', shopname:'Peoplewise Works', feeplan:'uw-bed', email:'seed.peoplewise@example.com',
-          kana:'さとう かな', member:'uw', uwid:'MKR-97080', achiever:'佐藤 かな', social:'https://instagram.com/peoplewise_works',
-          content:'ボディケア＆リラクゼーション', attendeeCount:1, comment:'短時間で整えるケアを提供します。',
-          adminRequest:'施術ベッド持込予定です。', createdAt:'2026.05.31'
-        },
-        {
-          id:'seed-app-event-1', person:'seed-person-e1', event:eventId, status:'new',
-          line:'0', eyecatch:'0', eyecatchImage:'', category:'event', party:'no', first:'first',
-          personname:'田中 まい', shopname:'田中 まい', feeplan:'event-fee', email:'seed.event1@example.com',
-          kana:'たなか まい', member:'non', uwid:'', achiever:'', social:'',
-          content:'初参加です。よろしくお願いします。', attendeeCount:2, comment:'',
-          adminRequest:'アレルギー対応の確認をお願いします。', createdAt:'2026.05.31'
-        },
-        {
-          id:'seed-app-event-2', person:'seed-person-e2', event:eventId, status:'confirmed',
-          line:'0', eyecatch:'0', eyecatchImage:'', category:'event', party:'no', first:'repeat',
-          personname:'鈴木 さゆり', shopname:'鈴木 さゆり', feeplan:'event-fee', email:'seed.event2@example.com',
-          kana:'すずき さゆり', member:'non', uwid:'', achiever:'', social:'',
-          content:'友人と参加予定です。', attendeeCount:3, comment:'',
-          adminRequest:'車いす席を1名分お願いします。', createdAt:'2026.06.01'
-        }
-      ];
-      seedApps.forEach(function(app){ upsertById(APPLICATIONS, app); });
-      localStorage.setItem(REAL_SEED_KEY, '1');
-      markStateDirty();
-      saveAppState();
     }
     function purgeSeedDataOnce(){
       // イベント・申込はlocalStorageに保存しなくなったため不要。念のためメモリ内seed除去のみ。
@@ -4652,38 +4521,6 @@
       if(!token) return '';
       var base = location.origin + location.pathname;
       return base + '?login=' + encodeURIComponent(token) + '#mypage';
-    }
-    function showCompleteLoginInfo(email, loginUrl){
-      var box = document.getElementById('complete-login-box');
-      var mailEl = document.getElementById('complete-login-mail');
-      var linkEl = document.getElementById('complete-login-link');
-      LOGIN_LINK_BUFFER = loginUrl || '';
-      if(!box || !mailEl || !linkEl){
-        return;
-      }
-      if(!loginUrl){
-        box.style.display = 'none';
-        return;
-      }
-      box.style.display = '';
-      mailEl.textContent = '送付先：' + (email||'-');
-      linkEl.textContent = loginUrl;
-      linkEl.href = loginUrl;
-    }
-    function copyCompleteLoginUrl(){
-      if(!LOGIN_LINK_BUFFER){
-        showToast('コピーできるURLがありません','warn');
-        return;
-      }
-      if(navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(LOGIN_LINK_BUFFER).then(function(){
-          showToast('ログインURLをコピーしました','success');
-        }).catch(function(){
-          showToast('コピーに失敗しました','warn');
-        });
-      }else{
-        showToast('この端末ではコピーに対応していません','warn');
-      }
     }
     function tryLoginByUrlToken(){
       var params = new URLSearchParams(location.search||'');
@@ -7936,6 +7773,7 @@ mikke.ruu2025@gmail.com`;
     var ORG_SETTINGS = {
       name: 'Mikke ruu',
       host: 'Mikke 運営チーム',
+      receiptIssuer: 'Mikkeruu 運営',
       instagram: 'https://www.instagram.com/',
       line: '', // 招待制オープンチャット（管理者の内部メモ用、公開しない）
       website: '',
@@ -8054,6 +7892,7 @@ mikke.ruu2025@gmail.com`,
       setVal('org-term-policy', s.termPolicy);
       setVal('org-term-policy-event', s.eventTermPolicy || s.termPolicy);
       setVal('org-theme-color', s.themeColor);
+      setVal('org-receipt-issuer', s.receiptIssuer);
       var ct = document.getElementById('org-consult-type');
       if(ct) ct.value = s.consultType;
     }
@@ -8072,6 +7911,7 @@ mikke.ruu2025@gmail.com`,
       ORG_SETTINGS.termPolicy = get('org-term-policy') || ORG_SETTINGS.termPolicy;
       ORG_SETTINGS.eventTermPolicy = get('org-term-policy-event') || ORG_SETTINGS.eventTermPolicy || ORG_SETTINGS.termPolicy;
       ORG_SETTINGS.themeColor = get('org-theme-color') || ORG_SETTINGS.themeColor;
+      ORG_SETTINGS.receiptIssuer = get('org-receipt-issuer') || ORG_SETTINGS.receiptIssuer;
       applyOrgSettings();
       updateApplyTermsUI();
       saveOrgSettingsToSupabase(); // Supabase保存（多端末同期）
@@ -11026,15 +10866,6 @@ mikke.ruu2025@gmail.com`,
         '<div class="ev-revenue-row total" style="margin-top:6px;border-color:#cce7d8"><span class="lbl">交流会 合計</span><span class="val">¥'+partyTotal.toLocaleString()+'</span></div>'+
       '</div>';
     }
-    function saveGeneralCount(evId){
-      var ev = EVENTS.find(function(x){return x.id===evId});
-      if(!ev || !ev.party) return;
-      var input = document.getElementById('ev-general-'+evId);
-      ev.party.generalCount = parseInt(input.value)||0;
-      renderEventList();
-      showToast('一般参加者数を保存しました','success');
-    }
-
     function saveActualRevenue(evId){
       var ev = EVENTS.find(function(x){return x.id===evId});
       if(!ev) return;
@@ -11166,6 +10997,48 @@ mikke.ruu2025@gmail.com`,
         '</body></html>');
       w.document.close();
     }
+    // ── 申込一覧のCSV書き出し（会計・集金用） ──
+    function _csvCell(v){
+      var t = (v==null?'':String(v));
+      if(/[",\n\r]/.test(t)) t = '"'+t.replace(/"/g,'""')+'"';
+      return t;
+    }
+    function exportApplicationsCsv(evId){
+      var ev = (EVENTS||[]).find(function(e){return e.id===evId;});
+      if(!ev){showToast('イベントが見つかりません','warn');return;}
+      var isEv = isParticipantOnlyEvent(ev);
+      var rows = (APPLICATIONS||[]).filter(function(a){return a.event===ev.id;});
+      if(!rows.length){showToast('申込がありません','warn');return;}
+      var catLbl = function(c){return c==='retail'?'物販':c==='food'?'飲食':c==='session'?'セッション':c==='treatment'?'施術':c==='event'?'参加':'-';};
+      var stLbl = function(st){return st==='confirmed'?(isEv?'参加確定':'出店確定'):st==='hold'?'保留':'新規';};
+      var feeOf = function(a){
+        var p = (ev.feeOptions||[]).find(function(o){return o.id===a.feeplan;});
+        if(p) return parseInt(p.yen,10)||0;
+        return (a.answers && parseInt(a.answers.feeYen,10)) || 0;
+      };
+      var header = ['No','名前','ステータス','種別','屋号','UW-ID','アチーバー','メール','人数','金額'];
+      var lines = [header.map(_csvCell).join(',')];
+      var total = 0;
+      rows.forEach(function(a, i){
+        var yen = feeOf(a);
+        if(a.status==='confirmed') total += yen;
+        var cnt = a.attendeeCount || (a.answers && a.answers.attendeeCount) || '';
+        lines.push([
+          i+1, a.personname||'', stLbl(a.status), catLbl(a.category), a.shopname||'',
+          a.uwid||'', a.achiever||'', a.email||'', cnt, yen
+        ].map(_csvCell).join(','));
+      });
+      lines.push('');
+      lines.push(_csvCell('確定者 集金合計見込み')+','+total);
+      var csv = '\ufeff' + lines.join('\r\n');
+      var blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement('a');
+      var fn = (ev.name||'list').replace(/[\\\/:*?"<>|]/g,'_') + '_' + String(todayStr()).replace(/[.\-]/g,'') + '.csv';
+      link.href = url; link.download = fn; document.body.appendChild(link); link.click();
+      setTimeout(function(){ document.body.removeChild(link); URL.revokeObjectURL(url); }, 100);
+      showToast('CSVを書き出しました（'+rows.length+'件）','success');
+    }
     // ── 出店者・参加者の印刷用リスト（現地集金チェック用） ──
     function printExhibitorList(evId){
       var ev = (EVENTS||[]).find(function(e){return e.id===evId;});
@@ -11192,14 +11065,17 @@ mikke.ruu2025@gmail.com`,
     }
     // ── 領収書（運営が申込一覧から発行・印刷/PDF） ──
     function getReceiptIssuer(){
-      try{ return localStorage.getItem('mikke_receipt_issuer') || 'Mikkeruu 運営'; }catch(e){ return 'Mikkeruu 運営'; }
+      return (typeof ORG_SETTINGS!=='undefined' && ORG_SETTINGS && ORG_SETTINGS.receiptIssuer) || 'Mikkeruu 運営';
     }
     function setReceiptIssuer(){
       var cur = getReceiptIssuer();
       var next = prompt('領収書に記載する発行者名（屋号・住所・連絡先など自由に入力できます）', cur);
       if(next===null) return;
-      try{ localStorage.setItem('mikke_receipt_issuer', next.trim()); }catch(e){}
-      showToast('領収書の発行者名を保存しました','success');
+      ORG_SETTINGS.receiptIssuer = next.trim();
+      var f = document.getElementById('org-receipt-issuer'); if(f) f.value = ORG_SETTINGS.receiptIssuer;
+      if(typeof saveOrgSettingsToSupabase==='function') saveOrgSettingsToSupabase();
+      markStateDirty(); saveAppState();
+      showToast('領収書の発行者名を保存しました（全端末に同期）','success');
     }
     function openReceiptWindow(appId){
       var a = (APPLICATIONS||[]).find(function(x){return x.id===appId || x.supabaseId===appId;});
@@ -11391,6 +11267,7 @@ mikke.ruu2025@gmail.com`,
               '<button class="full" style="background:#fff;border:1px solid var(--ruu);color:var(--ruu)" onclick="openEventNoticeFromList(\''+ev.id+'\')">'+noticeTargetLabel+'</button>' : '')+
             '<button class="full" style="background:#fff;border:1px solid #57cdd1;color:#1f9ca0" onclick="copyEventShareUrl(\''+ev.id+'\')">📋 このイベントのURLをコピー（LINE等で共有）</button>'+
             '<button class="full" style="background:#fff;border:1px solid var(--line);color:var(--ink)" onclick="printExhibitorList(\''+ev.id+'\')">🖨 '+ownerLabel+'リストを印刷（集金チェック用）</button>'+
+            '<button class="full" style="background:#fff;border:1px solid var(--line);color:var(--ink)" onclick="exportApplicationsCsv(\''+ev.id+'\')">📄 '+ownerLabel+'リストをCSVで書き出す</button>'+
             '<button class="edit" onclick="openEventEditSheet(\''+ev.id+'\')">編集</button>'+
             '<button class="del" onclick="deleteEvent(\''+ev.id+'\')">削除</button>'+
             '<button class="full" style="background:#fff;border:1px solid var(--line);color:var(--ink)" onclick="duplicateEvent(\''+ev.id+'\')">このイベントを元に新規作成</button>'+
@@ -13000,6 +12877,7 @@ mikke.ruu2025@gmail.com`,
       tryLoginByUrlToken();
       initSupabaseAuthFromUrl()
         .then(loadPublicEventsFromSupabase)
+        .then(function(){return loadPublicNoticesFromSupabase();})
         .then(function(){return loadCurrentUserApplicationsFromSupabase({silent:true});})
         .then(function(){
           // マイページの初回確認完了 → ローディング表示を解除して再描画
