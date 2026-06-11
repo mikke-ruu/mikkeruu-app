@@ -2084,14 +2084,27 @@
     async function syncProfileFromSupabaseSession(session){
       var sb = getSupabaseClient();
       if(!sb || !session || !session.user) return false;
+      var newEmail = (session.user.email||'').toLowerCase();
+      var prevEmail = (CURRENT_USER_EMAIL||'').toLowerCase();
+      // 別アカウントでのログイン: 前のユーザーの表示・データを完全クリア（情報漏えい防止）
+      if(prevEmail && newEmail && prevEmail !== newEmail){
+        APPLICATIONS = [];
+        CURRENT_USER_EVENTS = {};
+        NOTICES = (NOTICES||[]).filter(function(n){return !n || n.channel!=='individual';});
+        ['priv-name','priv-kana','priv-mail','priv-member','priv-achiever',
+         'mypage-name','mypage-cat','mypage-content','mypage-instagram','mypage-uword','mypage-uwordid'
+        ].forEach(function(elId){ var el=document.getElementById(elId); if(el) el.textContent='未入力'; });
+        if(typeof setMypageEyecatchPending==='function') setMypageEyecatchPending();
+      }
+      // メールは認証セッションのものを正とする（profilesの古いメールで上書きしない）
       CURRENT_USER_EMAIL = session.user.email || CURRENT_USER_EMAIL || '';
-      CURRENT_USER_ID = session.user.id || CURRENT_USER_ID || '';
+      CURRENT_USER_ID = session.user.id || '';
       CURRENT_USER_ROLE = 'exhibitor';
       try{
         var res = await sb.from('profiles').select('role,display_name,email').eq('user_id', session.user.id).maybeSingle();
         if(res && res.data){
           CURRENT_USER_ROLE = res.data.role === 'admin' ? 'admin' : 'exhibitor';
-          CURRENT_USER_EMAIL = res.data.email || CURRENT_USER_EMAIL;
+          if(!CURRENT_USER_EMAIL) CURRENT_USER_EMAIL = res.data.email || '';
         }
       }catch(e){}
       // 管理者が「出店者として見る」メールを設定済みなら、マイページ表示はそのメールで扱う
@@ -3450,12 +3463,12 @@
       showPage('home', true);
     }
     // ===== 管理者の出店者ビュー（管理ログインはそのまま、マイページだけ出店者メールで表示） =====
-    // 6桁コードでログイン（リンクと違いどのブラウザでも確実に使える）
+    // 認証コード（数字）でログイン（リンクと違いどのブラウザでも確実に使える）
     async function verifyMypageOtpCode(){
       var email = ((document.getElementById('mypage-login-email')||{}).value||'').trim();
       var code = ((document.getElementById('mypage-login-code')||{}).value||'').trim();
       if(!email){ showToast('メールアドレスを入力してください','warn'); return; }
-      if(!code){ showToast('メールに記載の6桁コードを入力してください','warn'); return; }
+      if(!code){ showToast('メールに記載の認証コード（数字）を入力してください','warn'); return; }
       var sb = getSupabaseClient();
       if(!sb){ showToast('ログインを利用できません','warn'); return; }
       try{
@@ -3503,7 +3516,7 @@
         var redirectTo = (location.origin||'')+location.pathname+'#mypage';
         var res = await sb.auth.signInWithOtp({ email:email, options:{ emailRedirectTo:redirectTo, shouldCreateUser:true } });
         if(res.error) throw res.error;
-        showToast('メールを送りました。リンクを押すか、6桁コードを下に入力してください。','success');
+        showToast('メールを送りました。リンクを押すか、認証コード（数字）を下に入力してください。','success');
         var otpRow = document.getElementById('mypage-otp-row');
         if(otpRow) otpRow.style.display = 'flex';
       }catch(e){
@@ -4483,8 +4496,8 @@
           actions.innerHTML = '<input class="input" id="mypage-login-email" type="email" placeholder="メールアドレス" style="width:100%;box-sizing:border-box">'
             +'<button class="primary" onclick="sendMypageMagicLink()">ログインリンク・コードを送る</button>'
             +'<div id="mypage-otp-row" style="display:none;gap:8px;flex-direction:column">'
-              +'<p class="helper" style="margin:2px 0 0;font-weight:850;color:var(--ruu)">この画面を開いたまま、メールに書かれた6桁コードを入力するのが確実です（メールのリンクは別のブラウザで開くことがあります）</p>'
-              +'<input class="input" id="mypage-login-code" type="text" inputmode="numeric" placeholder="メールに記載の6桁コード" style="width:100%;box-sizing:border-box">'
+              +'<p class="helper" style="margin:2px 0 0;font-weight:850;color:var(--ruu)">この画面を開いたまま、メールに書かれた認証コード（数字）を入力するのが確実です（メールのリンクは別のブラウザで開くことがあります）</p>'
+              +'<input class="input" id="mypage-login-code" type="text" inputmode="numeric" placeholder="メールに記載の認証コード（数字）" style="width:100%;box-sizing:border-box">'
               +'<button class="primary" style="background:#3ba48a" onclick="verifyMypageOtpCode()">コードでログイン</button>'
             +'</div>'
             +'<button class="secondary" style="font-size:11px" onclick="showPage(\'events\')">申込はこちら</button>'
