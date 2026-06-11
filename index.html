@@ -4886,20 +4886,20 @@
       resetApplyTermsAck();
       markStateDirty();
       saveAppState();
-      saveApplicationToSupabase(data, id);
       showToast(data.isParticipantEvent ? '参加申込を受付しました' : '出店申込を受付しました','success');
-      (function(){
+      // 申込保存 → 「お申し込みありがとうございます」メール(B)を送信
+      // ※ログインコードは載せない。ログインしたい時にマイページからコードを取得する導線。
+      (async function(){
+        try{ await saveApplicationToSupabase(data, id); }catch(e){}
         var sb = getSupabaseClient();
         if(!sb || !data.email) return;
-        sb.auth.signInWithOtp({
-          email: data.email,
-          options: {
-            emailRedirectTo: window.location.origin + window.location.pathname + '#mypage',
-            shouldCreateUser: true,
-          }
-        }).then(function(res){
-          if(res.error) console.warn('[magic-link] send failed:', res.error.message);
-        });
+        var evObj = (EVENTS||[]).find(function(e){return e.id===data.eventId;});
+        var supaEvId = evObj && evObj.supabaseId ? evObj.supabaseId : '';
+        if(!supaEvId) return; // ローカルのみのイベント（テスト/seed）はメール送信なし
+        try{
+          sb.functions.invoke('application-received', { body: { email: data.email, event_id: supaEvId } })
+            .then(function(res){ if(res && res.error) console.warn('[ack-mail] send failed:', res.error.message); });
+        }catch(e){ console.warn('[ack-mail] invoke error', e); }
       })();
     }
     function toggleInlineDetail(){var detail=document.getElementById('home-inline-detail');if(detail){detail.classList.toggle('open')}}
@@ -11073,6 +11073,35 @@ mikke.ruu2025@gmail.com`,
       setTimeout(function(){ document.body.removeChild(link); URL.revokeObjectURL(url); }, 100);
       showToast('CSVを書き出しました（'+rows.length+'件）','success');
     }
+    // ── イベント終了後のお礼メール（出店確定者のみ一括送信・③） ──
+    async function sendEventThanks(evId){
+      var ev = (EVENTS||[]).find(function(e){return e.id===evId || e.supabaseId===evId;});
+      if(!ev){ showToast('イベントが見つかりません','warn'); return; }
+      if(!ev.supabaseId){ showToast('このイベントはクラウド未保存のため送信できません','warn'); return; }
+      var sb = getSupabaseClient();
+      if(!sb){ showToast('Supabase接続を確認できません','warn'); return; }
+      var confirmedCards = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card')).filter(function(c){
+        return (c.dataset.event===ev.id || c.dataset.event===ev.supabaseId) && c.dataset.status==='confirmed' && c.dataset.category!=='event';
+      });
+      var n = confirmedCards.length;
+      var evTitle = ev.title||ev.name||'このイベント';
+      if(!confirm('「'+evTitle+'」の出店確定者'+(n?('（約'+n+'名）'):'')+'にお礼メールを送ります。\nアンケートURLは自動で入ります。よろしいですか？')) return;
+      var surveyUrl = (typeof getExhibitorSurveyUrl==='function') ? getExhibitorSurveyUrl(ev.id) : '';
+      var nextLabel = prompt('次回イベントの見出し（任意・空欄でスキップ）\n例：8月のキッズマルシェ','') || '';
+      var nextUrl = '';
+      if(nextLabel){ nextUrl = prompt('次回イベントの募集URL（任意・空欄可）','') || ''; }
+      showToast('お礼メールを送信中…');
+      try{
+        var res = await sb.functions.invoke('event-thanks', { body: { event_id: ev.supabaseId, survey_url: surveyUrl, next_url: nextUrl, next_label: nextLabel } });
+        if(res.error) throw res.error;
+        var d = res.data||{};
+        if(d.error){ showToast('送信エラー：'+d.error,'warn'); return; }
+        showToast('送信完了：'+(d.sent||0)+'件送信'+((d.failed)?('／'+d.failed+'件失敗'):''), (d.failed?'warn':'success'));
+        if(typeof loadAdminMailLogsFromSupabase==='function') loadAdminMailLogsFromSupabase();
+      }catch(e){
+        showToast('送信できませんでした：'+((e&&e.message)||e),'warn');
+      }
+    }
     // ── 出店者・参加者の印刷用リスト（現地集金チェック用） ──
     function printExhibitorList(evId){
       var ev = (EVENTS||[]).find(function(e){return e.id===evId;});
@@ -11304,6 +11333,8 @@ mikke.ruu2025@gmail.com`,
           '<div class="ev-actions">'+
             (s==='past' ?
               '<button class="full" style="background:#fff;border:1px solid #ffb800;color:#c8924a" onclick="openSurveyResultsSheet(\''+ev.id+'\')">⭐ アンケート結果を見る（来場者'+getEventSurveys(ev.id,"visitor").length+'/出店者'+getEventSurveys(ev.id,"exhibitor").length+'件）</button>' : '')+
+            ((s==='past' && !isEventOnly) ?
+              '<button class="full" style="background:#fff;border:1px solid var(--ruu);color:var(--ruu)" onclick="sendEventThanks(\''+ev.id+'\')">💌 出店確定者にお礼メールを送る（アンケート・次回案内）</button>' : '')+
             (s==='upcoming' || s==='draft' ?
               '<button class="full" style="background:#fff;border:1px solid var(--ruu);color:var(--ruu)" onclick="openEventNoticeFromList(\''+ev.id+'\')">'+noticeTargetLabel+'</button>' : '')+
             '<button class="full" style="background:#fff;border:1px solid #57cdd1;color:#1f9ca0" onclick="copyEventShareUrl(\''+ev.id+'\')">📋 このイベントのURLをコピー（LINE等で共有）</button>'+
