@@ -115,7 +115,7 @@
     .tabs button{white-space:nowrap;min-height:40px;border:1px solid var(--line);border-radius:999px;background:#fff;padding:0 14px;font-weight:850;color:var(--sub);font-size:14px}
     .tabs button.active{background:var(--soft);color:var(--ruu);border-color:#f4cdd3}
     .info{display:grid;gap:9px;margin-top:14px;padding:14px;border-radius:18px;background:#fff9f1;border:1px solid #f1e4d0;color:var(--ink);font-size:14px}
-    .exhibitors{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.archive-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+    .exhibitors{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.archive-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;align-items:start}
     .shop,.archive-card{overflow:hidden;text-align:left;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:22px;box-shadow:0 14px 34px rgba(84,64,74,.07);padding:0;text-decoration:none}
     .archive-card{cursor:pointer}
     .shop img{width:100%;aspect-ratio:1/1;object-fit:cover;display:block}.archive-card img{width:100%;aspect-ratio:1.15/1;object-fit:cover;display:block}
@@ -2049,6 +2049,7 @@
     var APPLICATIONS = [];
     var PARTY_APPLICATIONS = [];
     var EVENTS_LOADING = true; // Supabaseからの初回イベント読み込みが終わるまで true
+    var MYPAGE_HYDRATING = true; // ログイン状態・自分の申込の初回確認が終わるまで true（マイページのローディング表示用）
     var MAIL_LOGS = [];
     var TEXT_SCALE_KEY = 'mikke_text_scale_v1';
     var __surveySubmitting = false;
@@ -2081,37 +2082,62 @@
       });
       return SUPABASE_CLIENT;
     }
-    async function syncProfileFromSupabaseSession(session){
+    // ===== マイページ専用クライアント（管理ログインと完全に独立したセッション） =====
+    var SUPABASE_USER_CLIENT = null;
+    var __userSessionActive = false; // マイページ（ユーザー）セッションが有効か
+    function getUserClient(){
+      if(SUPABASE_USER_CLIENT) return SUPABASE_USER_CLIENT;
+      if(!window.supabase || !window.supabase.createClient) return null;
+      SUPABASE_USER_CLIENT = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {persistSession:true, autoRefreshToken:true, detectSessionInUrl:false, flowType:'implicit', storageKey:'mikke-user-auth'}
+      });
+      return SUPABASE_USER_CLIENT;
+    }
+    // マイページ系の読み書きに使うクライアント（ユーザーセッション優先、旧方式ログインの互換あり）
+    function getMypageClient(){
+      return __userSessionActive ? (getUserClient() || getSupabaseClient()) : getSupabaseClient();
+    }
+    async function syncProfileFromSupabaseSession(session, identityOnly){
       var sb = getSupabaseClient();
       if(!sb || !session || !session.user) return false;
-      var newEmail = (session.user.email||'').toLowerCase();
-      var prevEmail = (CURRENT_USER_EMAIL||'').toLowerCase();
       // 別アカウントでのログイン: 前のユーザーの表示・データを完全クリア（情報漏えい防止）
-      if(prevEmail && newEmail && prevEmail !== newEmail){
-        APPLICATIONS = [];
-        CURRENT_USER_EVENTS = {};
-        NOTICES = (NOTICES||[]).filter(function(n){return !n || n.channel!=='individual';});
-        ['priv-name','priv-kana','priv-mail','priv-member','priv-achiever',
-         'mypage-name','mypage-cat','mypage-content','mypage-instagram','mypage-uword','mypage-uwordid'
-        ].forEach(function(elId){ var el=document.getElementById(elId); if(el) el.textContent='未入力'; });
-        if(typeof setMypageEyecatchPending==='function') setMypageEyecatchPending();
+      var clearIfSwitched = function(newEmail){
+        var prevEmail = (CURRENT_USER_EMAIL||'').toLowerCase();
+        if(prevEmail && newEmail && prevEmail !== newEmail){
+          APPLICATIONS = [];
+          CURRENT_USER_EVENTS = {};
+          NOTICES = (NOTICES||[]).filter(function(n){return !n || n.channel!=='individual';});
+          ['priv-name','priv-kana','priv-mail','priv-member','priv-achiever',
+           'mypage-name','mypage-cat','mypage-content','mypage-instagram','mypage-uword','mypage-uwordid'
+          ].forEach(function(elId){ var el=document.getElementById(elId); if(el) el.textContent='未入力'; });
+          if(typeof setMypageEyecatchPending==='function') setMypageEyecatchPending();
+        }
+      };
+      if(identityOnly){
+        // マイページ（ユーザー）セッション: 本人情報のみ更新。管理者ロール（管理ログイン）には触れない
+        clearIfSwitched((session.user.email||'').toLowerCase());
+        CURRENT_USER_EMAIL = session.user.email || '';
+        CURRENT_USER_ID = session.user.id || '';
+        if(CURRENT_USER_ROLE !== 'admin') CURRENT_USER_ROLE = 'exhibitor';
+        refreshCurrentUserEventsByEmail(CURRENT_USER_EMAIL);
+        markStateDirty();
+        saveAppState();
+        return true;
       }
-      // メールは認証セッションのものを正とする（profilesの古いメールで上書きしない）
-      CURRENT_USER_EMAIL = session.user.email || CURRENT_USER_EMAIL || '';
-      CURRENT_USER_ID = session.user.id || '';
-      CURRENT_USER_ROLE = 'exhibitor';
+      // 管理（メイン）セッション: ロールのみ反映。管理者のメールはマイページの本人情報にしない
+      var mainRole = 'exhibitor';
       try{
         var res = await sb.from('profiles').select('role,display_name,email').eq('user_id', session.user.id).maybeSingle();
-        if(res && res.data){
-          CURRENT_USER_ROLE = res.data.role === 'admin' ? 'admin' : 'exhibitor';
-          if(!CURRENT_USER_EMAIL) CURRENT_USER_EMAIL = res.data.email || '';
-        }
+        if(res && res.data && res.data.role === 'admin') mainRole = 'admin';
       }catch(e){}
-      // 管理者が「出店者として見る」メールを設定済みなら、マイページ表示はそのメールで扱う
-      if(CURRENT_USER_ROLE==='admin'){
-        var asEmail = '';
-        try{ asEmail = localStorage.getItem('mikke_admin_mypage_email')||''; }catch(e2){}
-        if(asEmail) CURRENT_USER_EMAIL = asEmail;
+      if(mainRole === 'admin'){
+        CURRENT_USER_ROLE = 'admin';
+      } else if(!__userSessionActive){
+        // 旧方式（メインクライアント）でログインした一般ユーザーの互換
+        clearIfSwitched((session.user.email||'').toLowerCase());
+        CURRENT_USER_EMAIL = session.user.email || '';
+        CURRENT_USER_ID = session.user.id || '';
+        CURRENT_USER_ROLE = 'exhibitor';
       }
       refreshCurrentUserEventsByEmail(CURRENT_USER_EMAIL);
       markStateDirty();
@@ -2133,16 +2159,20 @@
       if(params.get('access_token')){
         var accessToken = params.get('access_token');
         var refreshToken = params.get('refresh_token');
+        // recovery（管理者パスワード設定）は管理クライアント、それ以外（マイページログイン）はユーザークライアントへ
+        var isRecoveryLink = params.get('type') === 'recovery';
+        var authClient = isRecoveryLink ? sb : (getUserClient() || sb);
         try{
           var authRes = refreshToken
-            ? await sb.auth.setSession({access_token:accessToken, refresh_token:refreshToken})
-            : await sb.auth.getUser(accessToken);
+            ? await authClient.auth.setSession({access_token:accessToken, refresh_token:refreshToken})
+            : await authClient.auth.getUser(accessToken);
           var session = authRes && authRes.data && authRes.data.session;
           if(!session && authRes && authRes.data && authRes.data.user){
             session = {user: authRes.data.user};
           }
-          var isRecovery = params.get('type') === 'recovery';
-          if(await syncProfileFromSupabaseSession(session)){
+          var isRecovery = isRecoveryLink;
+          if(!isRecovery && session){ __userSessionActive = true; }
+          if(await syncProfileFromSupabaseSession(session, !isRecovery)){
             if(isRecovery){
               history.replaceState(null, '', location.pathname + '#admin');
               showPage('admin', true);
@@ -2171,12 +2201,23 @@
           return false;
         }
       }
+      // ユーザー（マイページ）セッションを独立に確認（管理ログインとは別物）
+      try{
+        var uc0 = getUserClient();
+        if(uc0){
+          var us0 = await uc0.auth.getSession();
+          if(us0 && us0.data && us0.data.session){
+            __userSessionActive = true;
+            await syncProfileFromSupabaseSession(us0.data.session, true);
+          }
+        }
+      }catch(e0){}
       try{
         var current = await sb.auth.getSession();
         var session2 = current && current.data && current.data.session;
         if(session2){
           await syncProfileFromSupabaseSession(session2);
-        } else if(CURRENT_USER_EMAIL || CURRENT_USER_ID || CURRENT_USER_ROLE==='admin'){
+        } else if(!__userSessionActive && (CURRENT_USER_EMAIL || CURRENT_USER_ID || CURRENT_USER_ROLE==='admin')){
           // セッションが切れているのにlocalStorageの旧ログイン情報が残っている「ゾンビログイン」を解消。
           // これを放置するとマイページが「まだ申込はありません」のまま固定され、再ログイン導線も出ない。
           CURRENT_USER_EMAIL = '';
@@ -2519,7 +2560,7 @@
 
     // ログインユーザーが自分のアイキャッチ URL を Supabase に更新する
     async function updateMyEyecatchInSupabase(imageUrl, eventSupabaseId){
-      var sb = getSupabaseClient();
+      var sb = getMypageClient();
       if(!sb) return false;
       try{
         var params = {p_image_url: imageUrl};
@@ -2701,15 +2742,15 @@
     async function loadCurrentUserApplicationsFromSupabase(options){
       var opts = options && typeof options === 'object' ? options : {};
       var silent = !!opts.silent;
-      var sb = getSupabaseClient();
+      var sb = getMypageClient();
       if(!sb) return false;
       try{
         var current = await sb.auth.getSession();
         var session = current && current.data && current.data.session;
         if(!session || !session.user || !CURRENT_USER_EMAIL) return false;
         // 未紐付け申込（user_id=null）をログイン済みユーザーに紐付け
-        // （管理者が出店者ビューで他人のメールを見ている時は紐付けない）
-        if(CURRENT_USER_ID && CURRENT_USER_EMAIL && CURRENT_USER_ROLE!=='admin'){
+        // （ユーザー本人のセッションがある時のみ。管理セッションのuidで他人の申込をclaimしない）
+        if(CURRENT_USER_ID && CURRENT_USER_EMAIL && (__userSessionActive || CURRENT_USER_ROLE!=='admin')){
           try{
             await sb.from('applications')
               .update({user_id: CURRENT_USER_ID})
@@ -2739,6 +2780,7 @@
         remoteApps.forEach(function(app){ upsertById(APPLICATIONS, app); });
         refreshCurrentUserEventsByEmail(CURRENT_USER_EMAIL);
         syncMypageProfileFromLatestApplication();
+        if(typeof fillMypagePrivFromLatest==='function') fillMypagePrivFromLatest();
         renderMypageEventCards();
         renderMypageNotices();
         markStateDirty();
@@ -2753,7 +2795,7 @@
     async function loadCurrentUserNoticesFromSupabase(options){
       var opts = options && typeof options === 'object' ? options : {};
       var silent = !!opts.silent;
-      var sb = getSupabaseClient();
+      var sb = getMypageClient();
       if(!sb) return false;
       try{
         var current = await sb.auth.getSession();
@@ -3444,11 +3486,18 @@
       showPage('home', true);
     }
     async function logoutMypage(){
-      var sb = getSupabaseClient();
-      if(sb){ try{ await sb.auth.signOut(); }catch(e){} }
+      // マイページ（ユーザー）セッションのみログアウト。管理ログインには影響しない
+      var sbu = getUserClient();
+      if(sbu){ try{ await sbu.auth.signOut(); }catch(e){} }
+      if(!__userSessionActive){
+        // 旧方式（メインクライアント）でログインしていた場合の互換: 管理者でなければメイン側も切る
+        var sbm = getSupabaseClient();
+        if(sbm && CURRENT_USER_ROLE!=='admin'){ try{ await sbm.auth.signOut(); }catch(e){} }
+      }
+      __userSessionActive = false;
       CURRENT_USER_ID = '';
       CURRENT_USER_EMAIL = '';
-      CURRENT_USER_ROLE = 'general';
+      if(CURRENT_USER_ROLE !== 'admin') CURRENT_USER_ROLE = 'general';
       APPLICATIONS = [];
       CURRENT_USER_EVENTS = {};
       NOTICES = (NOTICES||[]).filter(function(n){ return n.channel !== 'individual'; });
@@ -3463,19 +3512,30 @@
       showPage('home', true);
     }
     // ===== 管理者の出店者ビュー（管理ログインはそのまま、マイページだけ出店者メールで表示） =====
+    // 個人情報（非公開）欄を最新申込から補完（データ読込後に毎回呼べる・「未入力」の時のみ上書き）
+    function fillMypagePrivFromLatest(){
+      var lp = (typeof getCurrentUserApplications==='function' ? getCurrentUserApplications() : [])[0];
+      if(!lp) return;
+      var setT = function(elId, v){ var el=document.getElementById(elId); if(el && v && (el.textContent||'').trim()==='未入力') el.textContent = v; };
+      setT('priv-name', lp.personname);
+      setT('priv-kana', lp.kana);
+      setT('priv-mail', lp.email);
+      setT('priv-member', lp.member==='uw' ? 'UW会員' : (lp.member ? '非会員' : ''));
+      setT('priv-achiever', lp.achiever);
+    }
     // 認証コード（数字）でログイン（リンクと違いどのブラウザでも確実に使える）
     async function verifyMypageOtpCode(){
       var email = ((document.getElementById('mypage-login-email')||{}).value||'').trim();
       var code = ((document.getElementById('mypage-login-code')||{}).value||'').trim();
       if(!email){ showToast('メールアドレスを入力してください','warn'); return; }
       if(!code){ showToast('メールに記載の認証コード（数字）を入力してください','warn'); return; }
-      var sb = getSupabaseClient();
+      var sb = getUserClient() || getSupabaseClient();
       if(!sb){ showToast('ログインを利用できません','warn'); return; }
       try{
         var res = await sb.auth.verifyOtp({ email:email, token:code, type:'email' });
         if(res.error) throw res.error;
         var session = res.data && res.data.session;
-        if(session) await syncProfileFromSupabaseSession(session);
+        if(session){ __userSessionActive = true; await syncProfileFromSupabaseSession(session, true); }
         showPage('mypage', true);
         renderAll();
         if(typeof loadCurrentUserApplicationsFromSupabase==='function') loadCurrentUserApplicationsFromSupabase({silent:true});
@@ -3510,7 +3570,7 @@
       var emailInput = document.getElementById('mypage-login-email');
       var email = emailInput ? emailInput.value.trim() : '';
       if(!email){ showToast('メールアドレスを入力してください','warn'); return; }
-      var sb = getSupabaseClient();
+      var sb = getUserClient() || getSupabaseClient();
       if(!sb){ showToast('ログインを利用できません','warn'); return; }
       try{
         var redirectTo = (location.origin||'')+location.pathname+'#mypage';
@@ -3601,17 +3661,7 @@
       if(id === 'mypage'){
         // 申込直後・再ログインのどちらでも同じ見え方になるよう、プロフィール同期してから描画
         if(typeof syncMypageProfileFromLatestApplication==='function') syncMypageProfileFromLatestApplication();
-        // 個人情報（非公開）欄も最新申込から補完（再ログイン時に「未入力」のままになる問題の対策）
-        (function(){
-          var lp = (typeof getCurrentUserApplications==='function' ? getCurrentUserApplications() : [])[0];
-          if(!lp) return;
-          var setT = function(elId, v){ var el=document.getElementById(elId); if(el && v && (el.textContent||'').trim()==='未入力') el.textContent = v; };
-          setT('priv-name', lp.personname);
-          setT('priv-kana', lp.kana);
-          setT('priv-mail', lp.email);
-          setT('priv-member', lp.member==='uw' ? 'UW会員' : (lp.member ? '非会員' : ''));
-          setT('priv-achiever', lp.achiever);
-        })();
+        if(typeof fillMypagePrivFromLatest==='function') fillMypagePrivFromLatest();
         renderMypageEventCards();
       }
       syncFavoriteButtons();
@@ -4424,11 +4474,11 @@
       return !(app.category==='event' || isParticipantOnlyEvent(event));
     }
     function getMypageAccessMode(userApps){
-      // 管理者でも自分の申込があれば出店者/参加者としてマイページを使える
+      // マイページのログインは管理ログインと完全に別物。管理者も一般ユーザーと同じ導線でログインする
       var apps = Array.isArray(userApps) ? userApps : getCurrentUserApplications();
       if(apps.some(isBazaarApplication)) return 'bazaar';
       if(apps.length>0) return 'event';
-      return CURRENT_USER_ROLE==='admin' ? 'admin-empty' : 'empty';
+      return 'empty';
     }
     function renderMypageAccessState(userApps){
       var apps = Array.isArray(userApps) ? userApps : getCurrentUserApplications();
@@ -4446,18 +4496,12 @@
       ['mypage-notice-section','mypage-priv-card','mypage-event-list-head','mypage-event-tabs'].forEach(function(elId){
         var el = document.getElementById(elId); if(el) el.style.display = showFull ? '' : 'none';
       });
+      // マイページのログイン状態は管理ログインと独立（管理者でもマイページにログインしていればログアウト表示）
       var logoutRow = document.getElementById('mypage-logout-row');
-      if(logoutRow) logoutRow.style.display = (isLoggedIn && CURRENT_USER_ROLE !== 'admin') ? '' : 'none';
-      // 管理者の出店者ビュー解除ボタン（出店者ビュー表示中のみ）
+      if(logoutRow) logoutRow.style.display = (isLoggedIn && !MYPAGE_HYDRATING) ? '' : 'none';
+      // 旧「出店者ビュー解除」ボタンは廃止（2セッション分離により不要）
       var adminExit = document.getElementById('admin-mypage-exit-row');
-      if(!adminExit && logoutRow && logoutRow.parentNode){
-        adminExit = document.createElement('div');
-        adminExit.id = 'admin-mypage-exit-row';
-        adminExit.style.cssText = 'margin-top:10px;display:none';
-        adminExit.innerHTML = '<button class="secondary" style="width:100%" onclick="adminClearMypageEmail()">出店者ビューを解除（運営アカウントに戻る）</button>';
-        logoutRow.parentNode.insertBefore(adminExit, logoutRow);
-      }
-      if(adminExit) adminExit.style.display = (CURRENT_USER_ROLE==='admin' && showFull) ? '' : 'none';
+      if(adminExit) adminExit.style.display = 'none';
       var saveTip = document.getElementById('mypage-save-tip-btn');
       if(saveTip) saveTip.style.display = showFull ? '' : 'none';
       var evEmpty = document.getElementById('mypage-event-empty');
@@ -4474,6 +4518,13 @@
       if(!guide || !title || !body || !actions) return;
       guide.classList.toggle('show', showGuide);
       if(!showGuide) return;
+      // データ読み込み中は「まだ申込はありません」等を出さない（誤解防止のローディング表示）
+      if(MYPAGE_HYDRATING){
+        title.textContent = '読み込み中…';
+        body.textContent = 'マイページ情報を確認しています。少しお待ちください。';
+        actions.innerHTML = '';
+        return;
+      }
       if(mode==='admin-empty'){
         title.textContent = '運営アカウントでログイン中';
         body.textContent = '出店者としてもマイページを使う場合は、申込に使ったメールアドレスを設定してください。アイキャッチ提出やお知らせ確認が一般の出店者と同じ画面でできます。';
@@ -8268,7 +8319,7 @@ mikke.ruu2025@gmail.com`,
 
       // ─ Storage へアップロード（ログイン中なら）─
       var imageUrl = dataUrl; // フォールバック: data-URL のまま
-      var sb = getSupabaseClient();
+      var sb = getMypageClient();
       if(sb && file && CURRENT_USER_EMAIL){
         var safeEmail = CURRENT_USER_EMAIL.replace(/[^a-zA-Z0-9]/g,'_');
         var ext = (file.type||'image/jpeg').split('/')[1] || 'jpg';
@@ -8309,7 +8360,8 @@ mikke.ruu2025@gmail.com`,
         // 管理者の出店者ビューから提出した場合はRPC（自分の申込限定）が効かないため直接UPDATE
         if(!eyeRpcOk && CURRENT_USER_ROLE==='admin' && targetApp && targetApp.supabaseId){
           try{
-            var eyeUpd = await sb.from('applications').update({eyecatch_image_url: imageUrl}).eq('id', targetApp.supabaseId);
+            var sbAdm = getSupabaseClient();
+            var eyeUpd = await sbAdm.from('applications').update({eyecatch_image_url: imageUrl}).eq('id', targetApp.supabaseId);
             if(eyeUpd && eyeUpd.error) showToast('⚠ アイキャッチのクラウド保存に失敗：'+eyeUpd.error.message,'warn');
           }catch(e){}
         }
@@ -12934,6 +12986,12 @@ mikke.ruu2025@gmail.com`,
       initSupabaseAuthFromUrl()
         .then(loadPublicEventsFromSupabase)
         .then(function(){return loadCurrentUserApplicationsFromSupabase({silent:true});})
+        .then(function(){
+          // マイページの初回確認完了 → ローディング表示を解除して再描画
+          MYPAGE_HYDRATING = false;
+          var act = document.querySelector('.page.active');
+          if(act && act.id === 'mypage'){ fillMypagePrivFromLatest(); renderMypageEventCards(); }
+        })
         .then(function(){return loadCurrentUserNoticesFromSupabase({silent:true});})
         .then(function(){return loadAdminApplicationsFromSupabase({silent:true});})
         .then(function(){return loadAdminMailLogsFromSupabase({silent:true});})
@@ -12946,6 +13004,14 @@ mikke.ruu2025@gmail.com`,
     });
     // 即実行も保険で
     setTimeout(renderAll, 100);
+    // 保険: 8秒経っても初回確認が終わらない場合はローディング表示を解除
+    setTimeout(function(){
+      if(MYPAGE_HYDRATING){
+        MYPAGE_HYDRATING = false;
+        var act = document.querySelector('.page.active');
+        if(act && act.id === 'mypage') renderMypageEventCards();
+      }
+    }, 8000);
   </script>
 </body>
 </html>
