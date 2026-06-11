@@ -2075,7 +2075,8 @@
       if(SUPABASE_CLIENT) return SUPABASE_CLIENT;
       if(!window.supabase || !window.supabase.createClient) return null;
       SUPABASE_CLIENT = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-        auth: {persistSession:true, autoRefreshToken:true, detectSessionInUrl:false}
+        // flowType:'implicit' 必須: PKCEだとログインリンクが「送信したブラウザでしか」開けなくなる
+        auth: {persistSession:true, autoRefreshToken:true, detectSessionInUrl:false, flowType:'implicit'}
       });
       return SUPABASE_CLIENT;
     }
@@ -3448,6 +3449,27 @@
       showPage('home', true);
     }
     // ===== 管理者の出店者ビュー（管理ログインはそのまま、マイページだけ出店者メールで表示） =====
+    // 6桁コードでログイン（リンクと違いどのブラウザでも確実に使える）
+    async function verifyMypageOtpCode(){
+      var email = ((document.getElementById('mypage-login-email')||{}).value||'').trim();
+      var code = ((document.getElementById('mypage-login-code')||{}).value||'').trim();
+      if(!email){ showToast('メールアドレスを入力してください','warn'); return; }
+      if(!code){ showToast('メールに記載の6桁コードを入力してください','warn'); return; }
+      var sb = getSupabaseClient();
+      if(!sb){ showToast('ログインを利用できません','warn'); return; }
+      try{
+        var res = await sb.auth.verifyOtp({ email:email, token:code, type:'email' });
+        if(res.error) throw res.error;
+        var session = res.data && res.data.session;
+        if(session) await syncProfileFromSupabaseSession(session);
+        showPage('mypage', true);
+        renderAll();
+        if(typeof loadCurrentUserApplicationsFromSupabase==='function') loadCurrentUserApplicationsFromSupabase({silent:true});
+        showToast('マイページにログインしました','success');
+      }catch(e){
+        showToast('コードを確認できませんでした：'+((e&&e.message)||'')+'（期限切れの場合は再送してください）','warn');
+      }
+    }
     async function adminSetMypageEmail(){
       var input = document.getElementById('admin-mypage-email');
       var email = input ? input.value.trim() : '';
@@ -3480,7 +3502,9 @@
         var redirectTo = (location.origin||'')+location.pathname+'#mypage';
         var res = await sb.auth.signInWithOtp({ email:email, options:{ emailRedirectTo:redirectTo, shouldCreateUser:true } });
         if(res.error) throw res.error;
-        showToast('ログインリンクをメールで送りました。届かない場合は迷惑メールフォルダもご確認ください。','success');
+        showToast('メールを送りました。リンクを押すか、6桁コードを下に入力してください。','success');
+        var otpRow = document.getElementById('mypage-otp-row');
+        if(otpRow) otpRow.style.display = 'flex';
       }catch(e){
         var msg = (e&&e.message)||String(e);
         if(/rate|seconds/i.test(msg)){
@@ -4441,7 +4465,11 @@
           body.textContent = '申込時に使ったメールアドレスを入力すると、ログインリンクをお送りします。';
           actions.style.cssText = 'display:flex;flex-direction:column;gap:8px';
           actions.innerHTML = '<input class="input" id="mypage-login-email" type="email" placeholder="メールアドレス" style="width:100%;box-sizing:border-box">'
-            +'<button class="primary" onclick="sendMypageMagicLink()">ログインリンクを送る</button>'
+            +'<button class="primary" onclick="sendMypageMagicLink()">ログインリンク・コードを送る</button>'
+            +'<div id="mypage-otp-row" style="display:none;gap:8px;flex-direction:column">'
+              +'<input class="input" id="mypage-login-code" type="text" inputmode="numeric" placeholder="メールに記載の6桁コード" style="width:100%;box-sizing:border-box">'
+              +'<button class="primary" style="background:#3ba48a" onclick="verifyMypageOtpCode()">コードでログイン</button>'
+            +'</div>'
             +'<button class="secondary" style="font-size:11px" onclick="showPage(\'events\')">申込はこちら</button>'
             +(/Line\//i.test(navigator.userAgent)?'<p class="helper" style="margin:2px 0 0;font-size:11px">※ LINEのブラウザで開いています。メールのログインリンクは別のブラウザで開くため、ログイン後はそちらをブックマーク／ホーム画面追加すると便利です。</p>':'');
         }else{
@@ -6600,8 +6628,12 @@
       var isEv = isParticipantOnlyEvent(ev);
       var plan = getApplyFeePlanByEvent(ev ? ev.id : '', app.feeplan || '');
       var feeLabel = plan ? (plan.label + ' ¥' + (parseInt(plan.yen,10)||0).toLocaleString()) : '未設定';
+      // 確定済みの申込には領収書ボタン（電子領収書・印刷/PDF保存）
+      var receiptBtn = app.status==='confirmed'
+        ? '<button class="secondary" style="width:100%;margin:0 0 8px;min-height:40px" onclick="openReceiptWindow(\''+h(app.id)+'\')">🧾 領収書を表示（印刷・PDF保存）</button>'
+        : '';
       if(isEv){
-        return '<details class="app-confirm-details" open><summary>申込内容</summary>'+
+        return receiptBtn+'<details class="app-confirm-details" open><summary>申込内容</summary>'+
           '<div class="app-confirm-grid">'+
           '<div class="app-confirm-row"><span>お名前</span><span>'+h(app.personname||'-')+'</span></div>'+
           '<div class="app-confirm-row"><span>参加人数</span><span>'+(parseInt(app.attendeeCount||0,10)||1)+'名</span></div>'+
@@ -6613,6 +6645,7 @@
         var eyeSrc = app.eyecatchImage || '';
         var evId = ev ? ev.id : '';
         return (
+          receiptBtn+
           '<div class="mp-eyecatch-row'+(eyeDone?' done':'')+'">'+
             '<div class="mp-eyecatch-thumb"'+(eyeSrc?' style="background-image:url('+eyeSrc+')"':'')+' onclick="openEyecatchUploadSheet(\''+evId+'\')">' +
               (eyeSrc?'':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>')+
@@ -8407,11 +8440,9 @@ mikke.ruu2025@gmail.com`,
     function openEventInListById(eventId){
       if(!eventId){showToast('対象イベントがありません','warn');return;}
       closeAdminPanel();
+      renderEventList(); // 最新データでカードを再構築してから開く（データ未反映・スクロール不安定の対策）
       setTimeout(function(){
-        var panel = document.getElementById('admin-event-list');
-        if(panel && !panel.classList.contains('open')){
-          toggleAdminPanel('admin-event-list');
-        }
+        openAdminPanelForce('admin-event-list');
         setTimeout(function(){
           var card = document.getElementById('ev-'+eventId);
           if(card){
@@ -11021,6 +11052,69 @@ mikke.ruu2025@gmail.com`,
       if(btn) btn.textContent = isOpen ? '表示する' : '閉じる';
     }
 
+    // ── 印刷用ウィンドウ共通ヘルパー ──
+    function openPrintWindow(title, bodyHtml){
+      var w = window.open('', '_blank');
+      if(!w){ showToast('ポップアップがブロックされました。許可してください','warn'); return; }
+      w.document.write('<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>'+title+'</title>'+
+        '<style>body{font-family:"Hiragino Sans","Yu Gothic",sans-serif;color:#222;margin:24px;font-size:13px}'+
+        'h1{font-size:18px;margin:0 0 4px}p.sub{margin:0 0 14px;color:#666;font-size:12px}'+
+        'table{border-collapse:collapse;width:100%}th,td{border:1px solid #999;padding:6px 8px;font-size:12px;text-align:left}'+
+        'th{background:#f3f3f3}td.num,th.num{text-align:right}td.chk{width:46px;text-align:center}'+
+        '.receipt{max-width:560px;margin:40px auto;border:2px solid #333;padding:28px 32px}'+
+        '.receipt h1{text-align:center;letter-spacing:8px;font-size:22px;margin-bottom:24px}'+
+        '.r-row{display:flex;justify-content:space-between;border-bottom:1px solid #999;padding:8px 2px;font-size:14px}'+
+        '.r-amount{font-size:24px;font-weight:bold;text-align:center;border-bottom:3px double #333;padding:12px 0;margin:14px 0}'+
+        '@media print{button{display:none}}</style></head><body>'+bodyHtml+
+        '<button onclick="window.print()" style="margin-top:18px;padding:10px 24px;font-size:14px">印刷 / PDF保存</button>'+
+        '</body></html>');
+      w.document.close();
+    }
+    // ── 出店者・参加者の印刷用リスト（現地集金チェック用） ──
+    function printExhibitorList(evId){
+      var ev = (EVENTS||[]).find(function(e){return e.id===evId;});
+      if(!ev){showToast('イベントが見つかりません','warn');return;}
+      var isEv = isParticipantOnlyEvent(ev);
+      var rows = (APPLICATIONS||[]).filter(function(a){return a.event===ev.id && a.status==='confirmed';});
+      if(!rows.length){showToast('確定者がいません','warn');return;}
+      var catLbl = function(c){return c==='retail'?'物販':c==='food'?'飲食':c==='session'?'セッション':c==='treatment'?'施術':c==='event'?'参加':'-';};
+      var feeOf = function(a){
+        var p = (ev.feeOptions||[]).find(function(o){return o.id===a.feeplan;});
+        if(p) return parseInt(p.yen,10)||0;
+        return (a.answers && parseInt(a.answers.feeYen,10)) || 0;
+      };
+      var total = 0;
+      var trs = rows.map(function(a, i){
+        var yen = feeOf(a); total += yen;
+        return '<tr><td>'+(i+1)+'</td><td>'+h(a.personname||'-')+'</td><td>'+catLbl(a.category)+'</td><td>'+h(a.shopname||'-')+'</td>'+
+          '<td>'+h(a.uwid||'')+'</td><td>'+h(a.achiever||'')+'</td><td class="num">¥'+yen.toLocaleString()+'</td><td class="chk">☐</td></tr>';
+      }).join('');
+      openPrintWindow((ev.name||'')+' '+(isEv?'参加者':'出店者')+'リスト',
+        '<h1>'+h(ev.name||'')+'　'+(isEv?'参加者':'出店者')+'リスト（確定 '+rows.length+'件）</h1>'+
+        '<p class="sub">'+h(formatEventDate(ev)||'')+' ／ '+h(ev.venue||'')+' ／ 集金合計見込み ¥'+total.toLocaleString()+'</p>'+
+        '<table><tr><th>No</th><th>名前</th><th>種別</th><th>屋号</th><th>UW-ID</th><th>アチーバー</th><th class="num">金額</th><th>集金✓</th></tr>'+trs+'</table>');
+    }
+    // ── 領収書（マイページからPDF/印刷） ──
+    function openReceiptWindow(appId){
+      var a = (APPLICATIONS||[]).find(function(x){return x.id===appId || x.supabaseId===appId;});
+      if(!a){showToast('申込が見つかりません','warn');return;}
+      var ev = (EVENTS||[]).find(function(e){return e.id===a.event;});
+      var p = ev ? (ev.feeOptions||[]).find(function(o){return o.id===a.feeplan;}) : null;
+      var yen = p ? (parseInt(p.yen,10)||0) : ((a.answers && parseInt(a.answers.feeYen,10)) || 0);
+      var name = a.shopname || a.personname || '';
+      var isEv = isParticipantOnlyEvent(ev);
+      openPrintWindow('領収書',
+        '<div class="receipt">'+
+          '<h1>領収書</h1>'+
+          '<div class="r-row"><span>宛名</span><span>'+h(name)+' 様</span></div>'+
+          '<div class="r-amount">¥'+yen.toLocaleString()+'－</div>'+
+          '<div class="r-row"><span>但し</span><span>'+h((ev&&ev.name)||'')+' '+(isEv?'参加費':'出店料')+'として</span></div>'+
+          '<div class="r-row"><span>開催日</span><span>'+h(ev?formatEventDate(ev):'')+'</span></div>'+
+          '<div class="r-row"><span>発行日</span><span>'+todayStr()+'</span></div>'+
+          '<div class="r-row"><span>発行者</span><span>Mikkeruu 運営</span></div>'+
+          '<p style="font-size:11px;color:#666;margin-top:16px">上記正に領収いたしました。本領収書は電子発行のため印紙はありません。</p>'+
+        '</div>');
+    }
     // ── 会場の下見写真（管理者用・公開されない。extra.venuePhotos に Storage URL を保存）──
     function buildVenuePhotosAdminHtml(ev){
       var photos = Array.isArray(ev.venuePhotos) ? ev.venuePhotos : [];
@@ -11190,6 +11284,7 @@ mikke.ruu2025@gmail.com`,
             (s==='upcoming' || s==='draft' ?
               '<button class="full" style="background:#fff;border:1px solid var(--ruu);color:var(--ruu)" onclick="openEventNoticeFromList(\''+ev.id+'\')">'+noticeTargetLabel+'</button>' : '')+
             '<button class="full" style="background:#fff;border:1px solid #57cdd1;color:#1f9ca0" onclick="copyEventShareUrl(\''+ev.id+'\')">📋 このイベントのURLをコピー（LINE等で共有）</button>'+
+            '<button class="full" style="background:#fff;border:1px solid var(--line);color:var(--ink)" onclick="printExhibitorList(\''+ev.id+'\')">🖨 '+ownerLabel+'リストを印刷（集金チェック用）</button>'+
             '<button class="edit" onclick="openEventEditSheet(\''+ev.id+'\')">編集</button>'+
             '<button class="del" onclick="deleteEvent(\''+ev.id+'\')">削除</button>'+
             '<button class="full" style="background:#fff;border:1px solid var(--line);color:var(--ink)" onclick="duplicateEvent(\''+ev.id+'\')">このイベントを元に新規作成</button>'+
