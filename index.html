@@ -3588,6 +3588,17 @@
       if(id === 'mypage'){
         // 申込直後・再ログインのどちらでも同じ見え方になるよう、プロフィール同期してから描画
         if(typeof syncMypageProfileFromLatestApplication==='function') syncMypageProfileFromLatestApplication();
+        // 個人情報（非公開）欄も最新申込から補完（再ログイン時に「未入力」のままになる問題の対策）
+        (function(){
+          var lp = (typeof getCurrentUserApplications==='function' ? getCurrentUserApplications() : [])[0];
+          if(!lp) return;
+          var setT = function(elId, v){ var el=document.getElementById(elId); if(el && v && (el.textContent||'').trim()==='未入力') el.textContent = v; };
+          setT('priv-name', lp.personname);
+          setT('priv-kana', lp.kana);
+          setT('priv-mail', lp.email);
+          setT('priv-member', lp.member==='uw' ? 'UW会員' : (lp.member ? '非会員' : ''));
+          setT('priv-achiever', lp.achiever);
+        })();
         renderMypageEventCards();
       }
       syncFavoriteButtons();
@@ -12685,9 +12696,16 @@ mikke.ruu2025@gmail.com`,
       // Supabase 削除（album_photos は CASCADE で自動削除）
       if(a.supabaseId){
         var sb3 = getSupabaseClient();
-        if(sb3) sb3.from('albums').delete().eq('id', a.supabaseId).then(function(r){
-          if(r && r.error){ showToast('⚠ クラウド側の削除に失敗：'+(r.error.message||'')+'（リロードで復活します）','warn'); }
-        });
+        if(sb3){
+          // RPC（admin_delete_album・SECURITY DEFINER）優先、未デプロイなら直接DELETE
+          sb3.rpc('admin_delete_album', {p_album_id: a.supabaseId}).then(function(r){
+            if(r && r.error){
+              return sb3.from('albums').delete().eq('id', a.supabaseId).then(function(r2){
+                if(r2 && r2.error){ showToast('⚠ クラウド側の削除に失敗：'+(r2.error.message||'')+'（リロードで復活します）','warn'); }
+              });
+            }
+          });
+        }
       }
       ALBUMS = ALBUMS.filter(function(x){return x.id!==albumId});
       closeSheet();
