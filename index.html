@@ -2132,6 +2132,12 @@
       }catch(e){}
       if(mainRole === 'admin'){
         CURRENT_USER_ROLE = 'admin';
+        if(!__userSessionActive){
+          // マイページの身元はユーザーセッションのみ。旧ビルドが残した身元情報をクリア
+          // （これが残ると「まだ申込はありません＋ログアウト」という矛盾画面になる）
+          CURRENT_USER_EMAIL = '';
+          CURRENT_USER_ID = '';
+        }
       } else if(!__userSessionActive){
         // 旧方式（メインクライアント）でログインした一般ユーザーの互換
         clearIfSwitched((session.user.email||'').toLowerCase());
@@ -2313,9 +2319,8 @@
         if(state.surveyTemplates && typeof state.surveyTemplates==='object') SURVEY_TEMPLATES = Object.assign({}, SURVEY_TEMPLATES||{}, state.surveyTemplates);
         if(Array.isArray(state.faqs)) FAQS = state.faqs;
         if(state.orgSettings && typeof state.orgSettings==='object') ORG_SETTINGS = Object.assign({}, ORG_SETTINGS||{}, state.orgSettings);
-        CURRENT_USER_ROLE = state.currentUserRole || CURRENT_USER_ROLE || 'general';
-        CURRENT_USER_ID = state.currentUserId || CURRENT_USER_ID || '';
-        CURRENT_USER_EMAIL = state.currentUserEmail || CURRENT_USER_EMAIL || '';
+        // ログイン情報はlocalStorageから復元しない（Supabaseセッションが唯一の正。
+        // 復元するとセッション切れ後も「ログイン済み」に見えるゾンビ状態や他人情報の残留が起きる）
         // CURRENT_USER_EVENTS は Supabase から都度取得するので復元しない
         FAVORITES_BY_USER = (state.favoritesByUser && typeof state.favoritesByUser==='object') ? state.favoritesByUser : (FAVORITES_BY_USER || {});
         APPLY_DRAFTS = (state.applyDrafts && typeof state.applyDrafts==='object') ? state.applyDrafts : (APPLY_DRAFTS || {});
@@ -2424,9 +2429,16 @@
         }
         return true;
       }catch(e){
+        // 通信の一時失敗（スマホ回線等）は1回だけ自動リトライ
+        if(!window.__eventsLoadRetried){
+          window.__eventsLoadRetried = true;
+          return new Promise(function(resolve){
+            setTimeout(function(){ resolve(loadPublicEventsFromSupabase()); }, 1500);
+          });
+        }
         EVENTS_LOADING = false;
         syncPublicEventViews();
-        showToast('Supabaseのイベント読み込みに失敗しました。試作用データを表示します。', 'warn');
+        showToast('イベントの読み込みに失敗しました。通信環境をご確認のうえ再読み込みしてください。', 'warn');
         return false;
       }
     }
@@ -2683,7 +2695,12 @@
           .order('created_at',{ascending:false});
         if(res.error) throw res.error;
         var albumRows = res.data || [];
-        if(!albumRows.length) return true;
+        if(!albumRows.length){
+          // Supabaseが空＝アルバムなし（削除済みが端末に残らないようクリア）
+          ALBUMS = [];
+          renderAlbums(); renderHomeAlbums(); renderAdminAlbums();
+          return true;
+        }
         var albumIds = albumRows.map(function(a){return a.id;});
         var pRes = await sb.from('album_photos')
           .select('id,album_id,url,photo_type,sort_order')
@@ -2695,11 +2712,11 @@
           if(!photosByAlbum[p.album_id]) photosByAlbum[p.album_id] = [];
           photosByAlbum[p.album_id].push({id:p.id, src:p.url, type:p.photo_type||'image'});
         });
-        albumRows.forEach(function(row){
+        // Supabaseを唯一の正として全置き換え（マージ方式だと削除済みアルバムが端末に残り続ける）
+        ALBUMS = albumRows.map(function(row){
           var photos = photosByAlbum[row.id] || [];
-          var existingIdx = ALBUMS.findIndex(function(a){return a.supabaseId===row.id;});
           var ev = row.event_id ? (EVENTS||[]).find(function(x){return x.supabaseId===row.event_id;}) : null;
-          var album = {
+          return {
             id: 'a-sb-'+row.id.slice(0,8),
             supabaseId: row.id,
             title: row.title,
@@ -2711,8 +2728,6 @@
             cover: photos.length ? photos[0].id : '',
             source: 'supabase'
           };
-          if(existingIdx >= 0) ALBUMS[existingIdx] = album;
-          else ALBUMS.unshift(album);
         });
         renderAlbums(); renderHomeAlbums(); renderAdminAlbums();
         return true;
