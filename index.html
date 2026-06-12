@@ -2749,7 +2749,7 @@
             type: row.type||'event',
             eventKey: ev ? ev.id : '',
             photos: photos,
-            cover: photos.length ? photos[0].id : '',
+            cover: (function(){if(!photos.length)return '';if(row.cover_photo_url){var cp=photos.find(function(p){return p.src===row.cover_photo_url;});if(cp)return cp.id;}return photos[0].id;})(),
             source: 'supabase'
           };
         });
@@ -12866,7 +12866,6 @@ mikke.ruu2025@gmail.com`,
       var count = (a.photos||[]).length;
       return '<article class="album-card" onclick="openAlbumDetail(\''+a.id+'\')" role="button" tabindex="0">'+
         '<div class="cover" style="background-image:url('+cover+')">'+
-          '<span class="type-badge '+typeClass+'">'+typeLabel+'</span>'+
           '<span class="photo-count">'+count+'枚</span>'+
         '</div>'+
         '<div class="info"><b>'+a.title+'</b><span>'+a.subtitle+'</span><span class="date">'+a.date+'</span></div>'+
@@ -13106,7 +13105,7 @@ mikke.ruu2025@gmail.com`,
         if(coverP) updateAlbumMetaInSupabase(a.supabaseId, undefined, undefined, coverP.src);
       }
     }
-    function deleteAlbum(albumId){
+    async function deleteAlbum(albumId){
       var a = ALBUMS.find(function(x){return x.id===albumId});
       if(!a) return;
       if(!confirm('「'+a.title+'」を削除しますか？この操作は取り消せません。')) return;
@@ -13114,14 +13113,19 @@ mikke.ruu2025@gmail.com`,
       if(a.supabaseId){
         var sb3 = getSupabaseClient();
         if(sb3){
-          // RPC（admin_delete_album・SECURITY DEFINER）優先、未デプロイなら直接DELETE
-          sb3.rpc('admin_delete_album', {p_album_id: a.supabaseId}).then(function(r){
+          try{
+            var r = await sb3.rpc('admin_delete_album', {p_album_id: a.supabaseId});
             if(r && r.error){
-              return sb3.from('albums').delete().eq('id', a.supabaseId).then(function(r2){
-                if(r2 && r2.error){ showToast('⚠ クラウド側の削除に失敗：'+(r2.error.message||'')+'（リロードで復活します）','warn'); }
-              });
+              var r2 = await sb3.from('albums').delete().eq('id', a.supabaseId);
+              if(r2 && r2.error){
+                showToast('⚠ クラウド側の削除に失敗：'+(r2.error.message||'')+'（リロードで復活する場合があります）','warn');
+                return;
+              }
             }
-          });
+          }catch(e){
+            showToast('⚠ クラウド側の削除に失敗：'+(e.message||'通信エラー')+'（リロードで復活する場合があります）','warn');
+            return;
+          }
         }
       }
       ALBUMS = ALBUMS.filter(function(x){return x.id!==albumId});
