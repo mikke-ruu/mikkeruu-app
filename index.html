@@ -1910,6 +1910,14 @@
             <label style="font-size:11px;font-weight:900;color:var(--sub)">発行者名（屋号・住所・連絡先など。改行可）<textarea class="input" id="org-receipt-issuer" rows="3" style="resize:vertical" placeholder="例：Mikke ruu 運営"></textarea></label>
             <p class="helper" style="font-size:10px;color:var(--sub);margin-top:-4px">＊ 申込一覧の「🧾 領収書」で発行する書類に記載されます。全端末で共通になります。</p>
 
+            <p class="filter-label" style="margin-top:14px;margin-bottom:0">▼ 当日までのタスク（ひな型）</p>
+            <p class="helper" style="font-size:10px;color:var(--sub);margin:2px 0 6px">バザール作成時、開催日から逆算してこの予定が自動で入ります。基準（開催日／募集開始／募集締切）からの「ずらす日数」で調整できます（マイナス＝前）。各バザールの詳細でタスクの追加・編集もできます。</p>
+            <div id="org-task-template-host"></div>
+            <div style="display:flex;gap:8px;margin-top:4px">
+              <button type="button" class="filter-chip" onclick="addOrgTaskTemplateRow()">＋ 行を追加</button>
+              <button type="button" class="filter-chip" onclick="resetOrgTaskTemplate()">初期値に戻す</button>
+            </div>
+
             <p class="filter-label" style="margin-top:14px;margin-bottom:0">▼ 管理者パスワード変更</p>
             <label style="font-size:11px;font-weight:900;color:var(--sub)">現在のパスワード<input class="input" id="org-pwd-current" type="password" placeholder="••••••••" autocomplete="current-password"></label>
             <label style="font-size:11px;font-weight:900;color:var(--sub)">新しいパスワード<input class="input" id="org-pwd-new" type="password" placeholder="8文字以上推奨" autocomplete="new-password"></label>
@@ -2408,6 +2416,7 @@
         payment: ex.payment || '当日現金',
         party: (ex.party && typeof ex.party === 'object') ? ex.party : {enabled:false},
         venuePhotos: Array.isArray(ex.venuePhotos) ? ex.venuePhotos : [],
+        tasks: Array.isArray(ex.tasks) ? ex.tasks : [],
         source: 'supabase'
       };
     }
@@ -2559,7 +2568,8 @@
           payment:          ev.payment || '',
           party:            ev.party || {enabled:false},
           flyerImages:      ev.flyerImages || [],
-          venuePhotos:      ev.venuePhotos || []
+          venuePhotos:      ev.venuePhotos || [],
+          tasks:            ev.tasks || []
         }
       };
       try{
@@ -7838,6 +7848,7 @@ mikke.ruu2025@gmail.com`;
       name: 'Mikke ruu',
       host: 'Mikke 運営チーム',
       receiptIssuer: 'Mikkeruu 運営',
+      taskTemplate: null, // 当日までのタスクのひな型（null=DEFAULT_TASK_TEMPLATE）
       instagram: 'https://www.instagram.com/',
       line: '', // 招待制オープンチャット（管理者の内部メモ用、公開しない）
       website: '',
@@ -7957,6 +7968,7 @@ mikke.ruu2025@gmail.com`,
       setVal('org-term-policy-event', s.eventTermPolicy || s.termPolicy);
       setVal('org-theme-color', s.themeColor);
       setVal('org-receipt-issuer', s.receiptIssuer);
+      if(typeof renderOrgTaskTemplateRows==='function') renderOrgTaskTemplateRows();
       var ct = document.getElementById('org-consult-type');
       if(ct) ct.value = s.consultType;
     }
@@ -7976,6 +7988,7 @@ mikke.ruu2025@gmail.com`,
       ORG_SETTINGS.eventTermPolicy = get('org-term-policy-event') || ORG_SETTINGS.eventTermPolicy || ORG_SETTINGS.termPolicy;
       ORG_SETTINGS.themeColor = get('org-theme-color') || ORG_SETTINGS.themeColor;
       ORG_SETTINGS.receiptIssuer = get('org-receipt-issuer') || ORG_SETTINGS.receiptIssuer;
+      if(typeof collectOrgTaskTemplate==='function') ORG_SETTINGS.taskTemplate = collectOrgTaskTemplate();
       applyOrgSettings();
       updateApplyTermsUI();
       saveOrgSettingsToSupabase(); // Supabase保存（多端末同期）
@@ -11274,6 +11287,217 @@ mikke.ruu2025@gmail.com`,
       if(saveRes!==true){ showToast('⚠ クラウド保存に失敗：'+saveRes,'warn'); }
       renderEventList();
     }
+    // ============================================================
+    //  当日までのタスク（開催日から逆算・バザール別に追加/編集可）  ##138
+    // ============================================================
+    var DEFAULT_TASK_TEMPLATE = [
+      {key:'poster',  label:'ポスター作成',                          anchor:'recruitStart', offset:-3},
+      {key:'line',    label:'グループLINE設定・注意事項・アプリ案内', anchor:'recruitStart', offset:-1},
+      {key:'recruit', label:'募集開始',                              anchor:'recruitStart', offset:0},
+      {key:'deadline',label:'募集締切',                              anchor:'deadline',     offset:0},
+      {key:'confirm', label:'出店確定・LINE招待開始',                anchor:'deadline',     offset:1},
+      {key:'eyecatch',label:'アイキャッチ提出',                      anchor:'deadline',     offset:10},
+      {key:'zoomInfo',label:'Zoom説明会の案内',                      anchor:'event',        offset:-14},
+      {key:'zoom',    label:'Zoom説明会（日程調整）',                anchor:'event',        offset:-7},
+      {key:'zoomDay', label:'Zoom当日の案内',                        anchor:'event',        offset:-7},
+      {key:'preday',  label:'開催前日の案内',                        anchor:'event',        offset:-1},
+      {key:'eventday',label:'開催当日',                              anchor:'event',        offset:0},
+      {key:'thanks',  label:'お礼・アンケート・アルバム',            anchor:'event',        offset:1}
+    ];
+    function getTaskTemplate(){
+      return (ORG_SETTINGS && Array.isArray(ORG_SETTINGS.taskTemplate) && ORG_SETTINGS.taskTemplate.length)
+        ? ORG_SETTINGS.taskTemplate : DEFAULT_TASK_TEMPLATE;
+    }
+    function _taskAddDays(iso, n){
+      var p = normalizeDateInput(iso); if(!p) return '';
+      var d = new Date(p+'T00:00:00');
+      d.setDate(d.getDate() + (parseInt(n,10)||0));
+      var y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+      return y+'-'+m+'-'+dd;
+    }
+    function resolveTaskAnchorDate(ev, anchor){
+      var evDate = normalizeDateInput(ev.date);
+      if(anchor==='recruitStart') return normalizeDateInput(ev.recruitStart) || (evDate ? _taskAddDays(evDate,-30) : '');
+      if(anchor==='deadline'){
+        if(normalizeDateInput(ev.deadline)) return normalizeDateInput(ev.deadline);
+        var rs = normalizeDateInput(ev.recruitStart) || (evDate ? _taskAddDays(evDate,-30) : '');
+        return rs ? _taskAddDays(rs,7) : '';
+      }
+      return evDate;
+    }
+    function regenerateEventTasks(ev){
+      var prev = Array.isArray(ev.tasks) ? ev.tasks : [];
+      var byKey = {}; prev.forEach(function(t){ if(t&&t.key) byKey[t.key]=t; });
+      var out = [];
+      getTaskTemplate().forEach(function(tpl){
+        var old = byKey[tpl.key] || {};
+        out.push({
+          key: tpl.key,
+          label: old.labelEdited ? old.label : tpl.label,
+          labelEdited: !!old.labelEdited,
+          date: old.dateEdited ? old.date : resolveTaskAnchorDate(ev, tpl.anchor),
+          dateEdited: !!old.dateEdited,
+          done: !!old.done, doneAt: old.doneAt||'', note: old.note||''
+        });
+      });
+      prev.forEach(function(t){ if(t&&t.custom) out.push(t); });
+      ev.tasks = out;
+      return out;
+    }
+    function ensureEventTasks(ev){
+      if(!Array.isArray(ev.tasks) || !ev.tasks.length) return regenerateEventTasks(ev);
+      return ev.tasks;
+    }
+    function _taskFmt(iso){
+      var p = normalizeDateInput(iso); if(!p) return '未設定';
+      var a=p.split('-');
+      var w = (typeof computeDayOfWeek==='function') ? (computeDayOfWeek(p)||'') : '';
+      return (+a[1])+'/'+(+a[2])+(w?'（'+w+'）':'');
+    }
+    function _taskStatus(t){
+      if(t.done) return {label:'済', color:'#1f9ca0', bg:'#e8f9fa'};
+      var d = normalizeDateInput(t.date);
+      if(!d) return {label:'日付未設定', color:'#a59fb0', bg:'#f4f1f6'};
+      if(d < TODAY) return {label:'期限超過', color:'#fff', bg:'#e0607a'};
+      if(d === TODAY) return {label:'今日', color:'#fff', bg:'var(--ruu)'};
+      var a=new Date(d+'T00:00:00'), b=new Date(TODAY+'T00:00:00');
+      var n=Math.round((a-b)/86400000);
+      return {label:'あと'+n+'日', color:'var(--sub)', bg:'#fff5f7'};
+    }
+    function buildEventTaskRows(ev){
+      var tasks = ensureEventTasks(ev);
+      if(!tasks.length) return '<p class="helper" style="margin:6px 0">「開催日から逆算して作成」を押すとタスクが入ります。</p>';
+      var sorted = tasks.slice().sort(function(x,y){
+        if(!!x.done !== !!y.done) return x.done?1:-1;
+        return (normalizeDateInput(x.date)||'9999') < (normalizeDateInput(y.date)||'9999') ? -1 : 1;
+      });
+      return sorted.map(function(t){
+        var st=_taskStatus(t);
+        return '<div style="display:grid;grid-template-columns:22px 1fr auto;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f3eef2">'+
+          '<input type="checkbox"'+(t.done?' checked':'')+' onclick="toggleEventTask(\''+ev.id+'\',\''+t.key+'\')" style="width:18px;height:18px;accent-color:var(--ruu)">'+
+          '<div style="min-width:0">'+
+            '<div style="font-size:12.5px;font-weight:800;color:var(--ink);'+(t.done?'text-decoration:line-through;opacity:.6':'')+'">'+h(t.label)+'</div>'+
+            '<div style="font-size:11px;font-weight:700;color:var(--sub)">'+_taskFmt(t.date)+(t.note?(' ・'+h(t.note)):'')+'</div>'+
+          '</div>'+
+          '<div style="display:flex;align-items:center;gap:6px">'+
+            '<span style="font-size:10px;font-weight:900;color:'+st.color+';background:'+st.bg+';border-radius:999px;padding:2px 8px;white-space:nowrap">'+st.label+'</span>'+
+            '<button type="button" onclick="editEventTask(\''+ev.id+'\',\''+t.key+'\')" style="background:none;border:none;cursor:pointer;font-size:13px">✎</button>'+
+            '<button type="button" onclick="deleteEventTask(\''+ev.id+'\',\''+t.key+'\')" style="background:none;border:none;cursor:pointer;font-size:13px;color:#c66">✕</button>'+
+          '</div>'+
+        '</div>';
+      }).join('');
+    }
+    function buildEventTaskList(ev){
+      if(isParticipantOnlyEvent(ev)) return '';
+      return '<p class="ev-section-title"><svg><use href="#i-calendar"/></svg>やることリスト（当日までのタスク）</p>'+
+        '<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 12px;margin-bottom:10px">'+
+          '<div id="ev-tasks-rows-'+ev.id+'">'+buildEventTaskRows(ev)+'</div>'+
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'+
+            '<button type="button" onclick="autoFillEventSchedule(\''+ev.id+'\')" style="flex:1;min-width:150px;background:#fff;border:1px solid var(--ruu);color:var(--ruu);border-radius:10px;padding:8px;font-size:12px;font-weight:900;cursor:pointer">🗓 開催日から逆算して作成</button>'+
+            '<button type="button" onclick="addEventTask(\''+ev.id+'\')" style="flex:1;min-width:120px;background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:8px;font-size:12px;font-weight:900;cursor:pointer">＋ タスクを追加</button>'+
+          '</div>'+
+        '</div>';
+    }
+    function _findEvForTask(evId){ return (EVENTS||[]).find(function(e){return e.id===evId;}); }
+    function _refreshTaskRows(ev){
+      var host=document.getElementById('ev-tasks-rows-'+ev.id);
+      if(host) host.innerHTML = buildEventTaskRows(ev);
+    }
+    function _persistEventTasks(ev){
+      if(typeof markStateDirty==='function') markStateDirty();
+      if(typeof saveEventToSupabase==='function'){
+        saveEventToSupabase(ev).then(function(r){
+          if(r!==true) showToast('⚠ タスクのクラウド保存に失敗（管理者でログイン中か確認してください）','warn');
+        }).catch(function(){});
+      }
+    }
+    function toggleEventTask(evId, key){
+      var ev=_findEvForTask(evId); if(!ev) return; ensureEventTasks(ev);
+      var t=ev.tasks.find(function(x){return x.key===key;}); if(!t) return;
+      t.done=!t.done; t.doneAt=t.done?TODAY:'';
+      _refreshTaskRows(ev); _persistEventTasks(ev);
+    }
+    function editEventTask(evId, key){
+      var ev=_findEvForTask(evId); if(!ev) return; ensureEventTasks(ev);
+      var t=ev.tasks.find(function(x){return x.key===key;}); if(!t) return;
+      var nl=prompt('タスク名', t.label); if(nl===null) return;
+      var nd=prompt('日付（YYYY-MM-DD・空欄可）', normalizeDateInput(t.date)||''); if(nd===null) return;
+      var nn=prompt('メモ（任意）', t.note||''); if(nn===null) nn=t.note||'';
+      t.label=nl.trim()||t.label; t.labelEdited=true;
+      t.date=normalizeDateInput(nd.trim()); t.dateEdited=true;
+      t.note=nn.trim();
+      _refreshTaskRows(ev); _persistEventTasks(ev);
+    }
+    function addEventTask(evId){
+      var ev=_findEvForTask(evId); if(!ev) return; ensureEventTasks(ev);
+      var nl=prompt('追加するタスク名'); if(nl===null||!nl.trim()) return;
+      var nd=prompt('日付（YYYY-MM-DD・空欄可）',''); if(nd===null) nd='';
+      ev.tasks.push({key:'custom-'+Date.now().toString(36), label:nl.trim(), date:normalizeDateInput(nd.trim()), done:false, note:'', custom:true, labelEdited:true, dateEdited:true});
+      _refreshTaskRows(ev); _persistEventTasks(ev);
+    }
+    function deleteEventTask(evId, key){
+      var ev=_findEvForTask(evId); if(!ev) return; ensureEventTasks(ev);
+      if(!confirm('このタスクを削除しますか？')) return;
+      ev.tasks=ev.tasks.filter(function(x){return x.key!==key;});
+      _refreshTaskRows(ev); _persistEventTasks(ev);
+    }
+    function autoFillEventSchedule(evId){
+      var ev=_findEvForTask(evId); if(!ev) return;
+      var d=normalizeDateInput(ev.date);
+      if(!d){ showToast('先に開催日を設定してください','warn'); return; }
+      if(!confirm('開催日（'+_taskFmt(d)+'）から逆算して、募集開始・締切・アイキャッチ締切・Zoom日とタスク一覧を作成します。よろしいですか？')) return;
+      ev.recruitStart = _taskAddDays(d,-30);
+      ev.deadline = _taskAddDays(ev.recruitStart,7);
+      ev.eyecatchDeadline = _taskAddDays(ev.deadline,10);
+      ev.zoomDate = _taskAddDays(d,-7);
+      regenerateEventTasks(ev);
+      _refreshTaskRows(ev); _persistEventTasks(ev);
+      showToast('開催日から日程・タスクを作成しました','success');
+    }
+    // ── サイト設定: タスクのひな型エディタ ──
+    function _ttAnchorOptions(sel){
+      var opts=[['event','開催日'],['recruitStart','募集開始'],['deadline','募集締切']];
+      return opts.map(function(o){return '<option value="'+o[0]+'"'+(sel===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('');
+    }
+    function renderOrgTaskTemplateRows(){
+      var host=document.getElementById('org-task-template-host'); if(!host) return;
+      var tpl=getTaskTemplate();
+      host.innerHTML = tpl.map(function(t,i){
+        return '<div class="tt-row" data-key="'+String(t.key||'').replace(/"/g,'&quot;')+'" style="display:grid;grid-template-columns:1fr auto auto auto;gap:6px;align-items:center;margin-bottom:6px">'+
+          '<input class="input" id="org-tt-label-'+i+'" value="'+String(t.label||'').replace(/"/g,'&quot;')+'" placeholder="タスク名" style="min-width:0">'+
+          '<select class="input" id="org-tt-anchor-'+i+'" style="width:86px">'+_ttAnchorOptions(t.anchor)+'</select>'+
+          '<input class="input" id="org-tt-offset-'+i+'" type="number" value="'+(parseInt(t.offset,10)||0)+'" style="width:58px" title="ずらす日数（マイナス=前）">'+
+          '<button type="button" onclick="removeOrgTaskTemplateRow('+i+')" style="background:none;border:none;color:#c66;font-size:15px;cursor:pointer">✕</button>'+
+        '</div>';
+      }).join('');
+    }
+    function collectOrgTaskTemplate(){
+      var host=document.getElementById('org-task-template-host');
+      if(!host) return ORG_SETTINGS.taskTemplate || DEFAULT_TASK_TEMPLATE.slice();
+      var rows=host.querySelectorAll('.tt-row'); var out=[];
+      for(var i=0;i<rows.length;i++){
+        var label=(document.getElementById('org-tt-label-'+i)||{value:''}).value.trim();
+        if(!label) continue;
+        var anchor=(document.getElementById('org-tt-anchor-'+i)||{value:'event'}).value;
+        var offset=parseInt((document.getElementById('org-tt-offset-'+i)||{value:'0'}).value,10)||0;
+        var key=rows[i].getAttribute('data-key')||('tpl-'+i+'-'+Date.now().toString(36));
+        out.push({key:key, label:label, anchor:anchor, offset:offset});
+      }
+      return out.length ? out : DEFAULT_TASK_TEMPLATE.slice();
+    }
+    function addOrgTaskTemplateRow(){
+      var cur=collectOrgTaskTemplate();
+      cur.push({key:'tpl-new-'+Date.now().toString(36), label:'新しいタスク', anchor:'event', offset:0});
+      ORG_SETTINGS.taskTemplate=cur; renderOrgTaskTemplateRows();
+    }
+    function removeOrgTaskTemplateRow(i){
+      var cur=collectOrgTaskTemplate(); cur.splice(i,1);
+      ORG_SETTINGS.taskTemplate=cur.length?cur:DEFAULT_TASK_TEMPLATE.slice(); renderOrgTaskTemplateRows();
+    }
+    function resetOrgTaskTemplate(){
+      if(!confirm('タスクのひな型を初期値に戻しますか？')) return;
+      ORG_SETTINGS.taskTemplate=DEFAULT_TASK_TEMPLATE.slice(); renderOrgTaskTemplateRows();
+    }
     function buildEventListCard(ev){
       var s = getEventEffectiveStatus(ev);
       var badge = getEventStatusBadge(ev);
@@ -11306,6 +11530,7 @@ mikke.ruu2025@gmail.com`,
       var revenueHtml = buildEventRevenue(ev);
       var memoHtml = buildEventMemo(ev);
       var previewHtml = buildEventPublicPreview(ev);
+      var taskListHtml = buildEventTaskList(ev);
 
       // 管理者のみ情報（折りたたみ）
       var aRow = function(label, val){
@@ -11370,6 +11595,7 @@ mikke.ruu2025@gmail.com`,
         '</div>'+
         '<div class="ev-body">'+
           timelineHtml+
+          taskListHtml+
           statsHtml+
           revenueHtml+
           adminInfoHtml+
