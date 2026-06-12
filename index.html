@@ -1224,6 +1224,9 @@
               <h2>内容を確認してください</h2>
               <div class="info">
                 <b id="apply-confirm-event">対象イベント：-</b>
+                <b id="apply-confirm-when">日時：-</b>
+                <b id="apply-confirm-place">会場：-</b>
+                <b id="apply-confirm-address">住所：-</b>
                 <b id="apply-confirm-name">お名前：-</b>
                 <b id="apply-confirm-shop">屋号：-</b>
                 <b id="apply-confirm-category">ジャンル：-</b>
@@ -2892,6 +2895,16 @@
       if(!ev) return getAppBaseUrl();
       return getAppBaseUrl() + '#event=' + encodeURIComponent(ev.id);
     }
+    function shareEventLink(evId){
+      var ev=(EVENTS||[]).find(function(e){return e.id===evId;});
+      if(!ev) return;
+      var url=getEventShareUrl(ev);
+      if(navigator.share){
+        navigator.share({title:(ev.name||'Mikke ruu'), url:url}).catch(function(){});
+      } else {
+        copyText(url); showToast('共有リンクをコピーしました（LINE等に貼り付けできます）','success');
+      }
+    }
     function copyEventShareUrl(evId){
       var ev = (EVENTS||[]).find(function(e){return e.id===evId;});
       if(!ev){showToast('イベントが見つかりません','warn');return;}
@@ -3917,7 +3930,7 @@
       var bazaarDetailEl = document.getElementById('apply-bazaar-detail');
       if(bazaarDetailEl){
         if(!isEventApply && ev && applyStep===1){
-          bazaarDetailEl.innerHTML = buildEventPublicPreview(ev);
+          bazaarDetailEl.innerHTML = buildEventPublicPreview(ev, true);
           bazaarDetailEl.style.display = 'block';
         } else {
           bazaarDetailEl.style.display = 'none';
@@ -3927,7 +3940,7 @@
       var evPrevEl = document.getElementById('apply-event-preview');
       if(evPrevEl){
         if(isEventApply && ev && applyStep===2){
-          evPrevEl.innerHTML = buildEventPublicPreview(ev);
+          evPrevEl.innerHTML = buildEventPublicPreview(ev, true);
           evPrevEl.style.display = 'block';
         } else {
           evPrevEl.style.display = 'none';
@@ -4153,8 +4166,9 @@
       var capacity = parseInt(pp.capacity||0,10)||0;
       host.innerHTML =
         '<b>'+(pp.title||'交流会')+'</b>'+
-        '<b>日時：'+formatEvDateShort(ev)+' '+(pp.startTime||'-')+'〜'+(pp.endTime||'-')+'</b>'+
-        '<b>会場：'+(pp.venue||pp.address||'-')+'</b>'+
+        '<b>日時：'+(pp.date||formatEvDateShort(ev))+' '+(pp.startTime||'-')+'〜'+(pp.endTime||'-')+'</b>'+
+        '<b>会場：'+(pp.venue||'-')+'</b>'+
+        (pp.address?'<b>住所：'+pp.address+'</b>':'')+
         '<b>参加費：'+(pp.fee?('¥'+(parseInt(pp.fee,10)||0).toLocaleString()):'-')+'（'+(pp.payment||'-')+'）</b>'+
         '<b>定員：'+(capacity>0?(capacity+'名'):'-')+'</b>'+
         '<b>申込締切：'+(pp.deadline||'-')+'</b>'+
@@ -4322,6 +4336,11 @@
         if(el) el.style.display = visible ? '' : 'none';
       };
       setText('apply-confirm-event',(d.isParticipantEvent?'対象イベント：':'対象バザール：')+(d.eventName||'-'));
+      var _cev = (EVENTS||[]).find(function(e){return e.id===d.eventId;}) || {};
+      setText('apply-confirm-when','日時：'+(formatEvDateShort(_cev)||'-')+' '+(_cev.startTime||'')+(_cev.startTime||_cev.endTime?'〜':'')+(_cev.endTime||''));
+      setText('apply-confirm-place','会場：'+(_cev.venue||'-'));
+      setText('apply-confirm-address','住所：'+(_cev.address||'-'));
+      setVisible('apply-confirm-address', !!_cev.address);
       setText('apply-confirm-name','お名前：'+(d.personName||'-'));
       setText('apply-confirm-shop', d.isParticipantEvent ? '' : ('屋号：'+(d.shopName||'-')));
       setText('apply-confirm-category', d.isParticipantEvent ? '申込区分：イベント参加' : ('ジャンル：'+(d.categoryLabel||'-')));
@@ -6034,10 +6053,12 @@
     var CURRENT_DETAIL_EVID = '';
     var CURRENT_PARTY_EVID = '';
     function getPartyLinkedEvent(){
-      var preferred = CURRENT_PARTY_EVID || CURRENT_DETAIL_EVID;
-      var ev = (EVENTS||[]).find(function(e){return e.id===preferred;});
-      if(ev && ev.party && ev.party.enabled) return ev;
-      ev = (EVENTS||[]).find(function(e){return e.id===CURRENT_DETAIL_EVID && e.party && e.party.enabled;});
+      // 特定の交流会が指定されている場合は必ずそのイベントを返す（別の交流会へ飛ばさない）
+      if(CURRENT_PARTY_EVID){
+        var exact = (EVENTS||[]).find(function(e){return e.id===CURRENT_PARTY_EVID;});
+        if(exact) return exact;
+      }
+      var ev = (EVENTS||[]).find(function(e){return e.id===CURRENT_DETAIL_EVID && e.party && e.party.enabled;});
       if(ev) return ev;
       ev = (EVENTS||[]).find(function(e){return e.party && e.party.enabled && e.status==='public';});
       return ev || null;
@@ -6210,8 +6231,9 @@
       var capacity = parseInt(pp.capacity||0,10)||0;
       titleEl.textContent = pp.title || '交流会';
       metaEl.innerHTML =
-        '<span><svg class="icon"><use href="#i-calendar"/></svg> '+formatEvDateShort(ev)+' '+(pp.startTime||'-')+'〜'+(pp.endTime||'-')+'</span>'+
-        '<span><svg class="icon"><use href="#i-map"/></svg> '+(pp.venue||pp.address||'-')+'</span>';
+        '<span><svg class="icon"><use href="#i-calendar"/></svg> '+(pp.date||formatEvDateShort(ev))+' '+(pp.startTime||'-')+'〜'+(pp.endTime||'-')+'</span>'+
+        '<span><svg class="icon"><use href="#i-map"/></svg> '+(pp.venue||'-')+'</span>'+
+        (pp.address?'<span><svg class="icon"><use href="#i-map"/></svg> '+pp.address+'</span>':'');
       feeEl.textContent = pp.fee ? ('¥'+(parseInt(pp.fee,10)||0).toLocaleString()+'（'+(pp.payment||'')+'）') : '-';
       capEl.textContent = capacity>0 ? (capacity+'名') : '-';
       dlEl.textContent = pp.deadline || '-';
@@ -6446,6 +6468,7 @@
           '</div>'+
           (ev.content ?'<div style="margin-top:12px"><p class="filter-label" style="margin:0 0 4px">内容</p><p class="helper" style="margin:0;white-space:pre-wrap;word-break:break-word">'+h(ev.content)+'</p></div>':'')+
           '<div class="actions application-actions">'+partyApplyBtn+applyBtn+'</div>'+
+          '<div class="actions" style="margin-top:8px"><button class="secondary" onclick="shareEventLink(\''+ev.id+'\')">🔗 このページを共有する</button></div>'+
         '</article>'+
         sectionBottomHtml;
       initDetailHeroSlider(ev.id, detailImages);
@@ -10933,7 +10956,7 @@ mikke.ruu2025@gmail.com`,
     }
 
 
-    function buildEventPublicPreview(ev){
+    function buildEventPublicPreview(ev, hideTitle){
       var isEventOnly = isParticipantOnlyEvent(ev);
       var dateStr = formatEventDate(ev);
       var timeStr = (ev.startTime||'-')+'〜'+(ev.endTime||'-');
@@ -10972,7 +10995,7 @@ mikke.ruu2025@gmail.com`,
       } else if(getEventCapacityTotal(ev)){
         capHtml = getEventCapacityTotal(ev)+'名';
       }
-      return '<p class="ev-section-title" style="margin-top:0"><svg><use href="#i-globe"/></svg>公開プレビュー</p>'+
+      return (hideTitle?'':'<p class="ev-section-title" style="margin-top:0"><svg><use href="#i-globe"/></svg>公開プレビュー</p>')+
         '<div style="background:#fff8fb;border:1.5px solid #fde8ee;border-radius:14px;padding:14px 16px;margin-bottom:12px">'+
           '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">'+
             '<span style="font-size:10px;font-weight:900;color:var(--ruu);background:#fde8ee;border-radius:99px;padding:2px 10px;white-space:nowrap">'+h(ev.kind||'-')+'</span>'+
@@ -11021,9 +11044,25 @@ mikke.ruu2025@gmail.com`,
     }
 
     // ── 印刷用ウィンドウ共通ヘルパー ──
+    function isStandaloneApp(){
+      return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone===true;
+    }
+    function openDocOverlay(title, bodyHtml){
+      var old=document.getElementById('doc-overlay'); if(old) old.remove();
+      var ov=document.createElement('div'); ov.id='doc-overlay';
+      ov.style.cssText='position:fixed;inset:0;z-index:99999;background:#fff;overflow:auto;-webkit-overflow-scrolling:touch';
+      ov.innerHTML='<div class="doc-overlay-bar" style="position:sticky;top:0;display:flex;gap:8px;justify-content:flex-end;background:#fff;padding:10px 12px;border-bottom:1px solid #eee">'+
+          '<button onclick="window.print()" style="padding:8px 16px;font-size:13px;border:1px solid #ccc;border-radius:8px;background:#fff">印刷 / PDF保存</button>'+
+          '<button onclick="var o=document.getElementById(\'doc-overlay\');if(o)o.remove();" style="padding:8px 16px;font-size:13px;border:none;border-radius:8px;background:#ED5F7D;color:#fff">閉じる</button>'+
+        '</div>'+
+        '<style>#doc-overlay table{border-collapse:collapse;width:100%}#doc-overlay th,#doc-overlay td{border:1px solid #999;padding:6px 8px;font-size:12px;text-align:left}#doc-overlay th{background:#f3f3f3}#doc-overlay td.num,#doc-overlay th.num{text-align:right}#doc-overlay td.chk{width:46px;text-align:center}#doc-overlay .receipt{max-width:560px;margin:0 auto;border:2px solid #333;padding:20px 24px}#doc-overlay .receipt h1{text-align:center;letter-spacing:8px;font-size:22px;margin-bottom:20px}#doc-overlay .r-row{display:flex;justify-content:space-between;border-bottom:1px solid #999;padding:8px 2px;font-size:14px}#doc-overlay .r-amount{font-size:24px;font-weight:bold;text-align:center;border-bottom:3px double #333;padding:12px 0;margin:14px 0}@media print{#doc-overlay .doc-overlay-bar{display:none}}</style>'+
+        '<div style="padding:16px;font-family:\'Hiragino Sans\',\'Yu Gothic\',sans-serif;color:#222;font-size:13px">'+bodyHtml+'</div>';
+      document.body.appendChild(ov);
+    }
     function openPrintWindow(title, bodyHtml){
+      if(isStandaloneApp()){ openDocOverlay(title, bodyHtml); return; }
       var w = window.open('', '_blank');
-      if(!w){ showToast('ポップアップがブロックされました。許可してください','warn'); return; }
+      if(!w){ openDocOverlay(title, bodyHtml); return; }
       w.document.write('<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>'+title+'</title>'+
         '<style>body{font-family:"Hiragino Sans","Yu Gothic",sans-serif;color:#222;margin:24px;font-size:13px}'+
         'h1{font-size:18px;margin:0 0 4px}p.sub{margin:0 0 14px;color:#666;font-size:12px}'+
