@@ -7451,11 +7451,11 @@ mikke.ruu2025@gmail.com`;
     // 出店者アンケートを開く
     function openExhibitorSurveyForm(eventId){
       var ev = (EVENTS||[]).find(function(e){return e.id===eventId});
-      if(!ev) return;
+      var subtitle = ev ? (ev.name+'にご出店いただきありがとうございました') : 'ご出店いただきありがとうございました';
       var tpl = SURVEY_TEMPLATES.exhibitor || {};
       window.__svRatings = {};
       __surveySubmitting = false;
-      openSheet(tpl.title || '出店者アンケート', ev.name+'にご出店いただきありがとうございました',
+      openSheet(tpl.title || '出店者アンケート', subtitle,
         renderSurveyFormBody('exhibitor', eventId)
       );
     }
@@ -11389,13 +11389,38 @@ mikke.ruu2025@gmail.com`,
     }
     function buildEventTaskList(ev){
       if(isParticipantOnlyEvent(ev)) return '';
+      var tasks = ensureEventTasks(ev);
+      // 次のタスク = 未完了で日付が最も近いもの
+      var next = null;
+      tasks.forEach(function(t){
+        if(t.done) return;
+        var d = normalizeDateInput(t.date)||'9999';
+        if(!next || d < (normalizeDateInput(next.date)||'9999')) next = t;
+      });
+      var nextHtml;
+      if(next){
+        var st = _taskStatus(next);
+        nextHtml = '<div style="display:flex;align-items:center;gap:8px;padding:2px 0">'+
+          '<span style="font-size:10px;font-weight:900;color:#fff;background:var(--ruu);border-radius:999px;padding:3px 9px;white-space:nowrap">次のタスク</span>'+
+          '<span style="font-size:13px;font-weight:900;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+h(next.label)+'</span>'+
+          '<span style="font-size:11px;font-weight:800;color:'+st.color+';background:'+st.bg+';border-radius:999px;padding:2px 8px;margin-left:auto;white-space:nowrap">'+_taskFmt(next.date)+'・'+st.label+'</span>'+
+        '</div>';
+      } else if(tasks.length){
+        nextHtml = '<div style="font-size:12.5px;color:#1f9ca0;font-weight:800;padding:2px 0">すべてのタスクが完了しました 🎉</div>';
+      } else {
+        nextHtml = '<div style="font-size:12.5px;color:var(--sub);font-weight:800;padding:2px 0">「開催日から逆算して作成」でタスクが入ります</div>';
+      }
       return '<p class="ev-section-title"><svg><use href="#i-calendar"/></svg>やることリスト（当日までのタスク）</p>'+
         '<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 12px;margin-bottom:10px">'+
-          '<div id="ev-tasks-rows-'+ev.id+'">'+buildEventTaskRows(ev)+'</div>'+
-          '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'+
-            '<button type="button" onclick="autoFillEventSchedule(\''+ev.id+'\')" style="flex:1;min-width:150px;background:#fff;border:1px solid var(--ruu);color:var(--ruu);border-radius:10px;padding:8px;font-size:12px;font-weight:900;cursor:pointer">🗓 開催日から逆算して作成</button>'+
-            '<button type="button" onclick="addEventTask(\''+ev.id+'\')" style="flex:1;min-width:120px;background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:8px;font-size:12px;font-weight:900;cursor:pointer">＋ タスクを追加</button>'+
-          '</div>'+
+          nextHtml+
+          '<details style="margin-top:4px">'+
+            '<summary style="list-style:none;cursor:pointer;font-size:11.5px;font-weight:850;color:var(--ruu);padding:4px 0">すべてのタスクを見る・編集する ▾</summary>'+
+            '<div id="ev-tasks-rows-'+ev.id+'" style="margin-top:4px">'+buildEventTaskRows(ev)+'</div>'+
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'+
+              '<button type="button" onclick="autoFillEventSchedule(\''+ev.id+'\')" style="flex:1;min-width:150px;background:#fff;border:1px solid var(--ruu);color:var(--ruu);border-radius:10px;padding:8px;font-size:12px;font-weight:900;cursor:pointer">🗓 開催日から逆算して作成</button>'+
+              '<button type="button" onclick="addEventTask(\''+ev.id+'\')" style="flex:1;min-width:120px;background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:8px;font-size:12px;font-weight:900;cursor:pointer">＋ タスクを追加</button>'+
+            '</div>'+
+          '</details>'+
         '</div>';
     }
     function _findEvForTask(evId){ return (EVENTS||[]).find(function(e){return e.id===evId;}); }
