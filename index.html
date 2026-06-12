@@ -746,6 +746,8 @@
     .mypage-app-detail{margin-top:0}
 
     .admin-menu-label{display:flex;align-items:center;gap:5px;margin:0 0 7px;font-size:11px;font-weight:900;color:var(--sub);letter-spacing:.04em;text-transform:uppercase}
+    .tt-offset-input{-moz-appearance:textfield;appearance:textfield}
+    .tt-offset-input::-webkit-outer-spin-button,.tt-offset-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
     .admin-more{margin-top:12px}
     .admin-more>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border:1px solid var(--line);border-radius:16px;background:#fff;font-size:13px;font-weight:900;color:var(--ink)}
     .admin-more>summary::-webkit-details-marker{display:none}
@@ -6417,7 +6419,8 @@
       }
       var status = getEventEffectiveStatus(ev);
       var deadlinePassed = !!(ev.deadline && TODAY > ev.deadline);
-      var statusBadge = status==='past' ? '<span class="badge mint">終了</span>' : status==='draft' ? '<span class="badge orange">準備中</span>' : (deadlinePassed ? '<span class="badge mint">募集終了</span>' : '<span class="badge">募集中</span>');
+      var recruitNotStarted = !!(ev.recruitStart && status!=='past' && !deadlinePassed && TODAY < normalizeDateInput(ev.recruitStart));
+      var statusBadge = status==='past' ? '<span class="badge mint">終了</span>' : status==='draft' ? '<span class="badge orange">準備中</span>' : (deadlinePassed ? '<span class="badge mint">募集終了</span>' : (recruitNotStarted ? '<span class="badge mint">募集前</span>' : '<span class="badge">募集中</span>'));
       var isEventOnly = isParticipantOnlyEvent(ev);
       var kindBadge = getEventKindBadgeHtml(ev);
       var favoriteButton = renderFavoriteButton(ev.id);
@@ -11498,7 +11501,7 @@ mikke.ruu2025@gmail.com`,
         return '<div class="tt-row" data-key="'+String(t.key||'').replace(/"/g,'&quot;')+'" style="display:grid;grid-template-columns:1fr auto auto auto;gap:6px;align-items:center;margin-bottom:6px">'+
           '<input class="input" id="org-tt-label-'+i+'" value="'+String(t.label||'').replace(/"/g,'&quot;')+'" placeholder="タスク名" style="min-width:0">'+
           '<select class="input" id="org-tt-anchor-'+i+'" style="width:86px">'+_ttAnchorOptions(t.anchor)+'</select>'+
-          '<input class="input" id="org-tt-offset-'+i+'" type="number" value="'+(parseInt(t.offset,10)||0)+'" style="width:58px" title="ずらす日数（マイナス=前）">'+
+          '<input class="input tt-offset-input" id="org-tt-offset-'+i+'" type="number" inputmode="numeric" value="'+(parseInt(t.offset,10)||0)+'" style="width:64px;text-align:center;padding-left:6px;padding-right:6px" title="ずらす日数（マイナス=前）">'+
           '<button type="button" onclick="removeOrgTaskTemplateRow('+i+')" style="background:none;border:none;color:#c66;font-size:15px;cursor:pointer">✕</button>'+
         '</div>';
       }).join('');
