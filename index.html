@@ -6878,6 +6878,8 @@
       var s = getEventEffectiveStatus(ev);
       if(s==='past') return 'past';
       if(s==='draft') return 'draft';
+      var deadlinePassed = !!(ev.deadline && TODAY > ev.deadline);
+      if(ev.recruitStart && !deadlinePassed && TODAY < normalizeDateInput(ev.recruitStart)) return 'beforestart';
       var hasParty = !!(ev.party && ev.party.enabled);
       var recruiting = !ev.deadline || TODAY <= ev.deadline;
       if(hasParty && !recruiting) return 'dinner';
@@ -6886,6 +6888,7 @@
     }
     function getEventBadgeHtml(ev){
       var tag = getEventPublicTag(ev);
+      if(tag==='beforestart') return '<span class="badge mint">募集前</span>';
       if(tag==='recruiting') return '<span class="badge">募集中</span>';
       if(tag==='dinner') return '<span class="badge mint">交流会</span>';
       if(tag==='upcoming') return '<span class="badge orange">開催予定</span>';
@@ -6963,7 +6966,7 @@
       }else if(eventsPageFilter==='upcoming'){
         list = list.filter(function(ev){
           var tag = getEventPublicTag(ev);
-          return tag==='upcoming' || tag==='recruiting' || tag==='dinner';
+          return tag==='upcoming' || tag==='recruiting' || tag==='dinner' || tag==='beforestart';
         });
       }else if(eventsPageFilter==='dinner'){
         list = list.filter(function(ev){return getEventPublicTag(ev)==='dinner';});
