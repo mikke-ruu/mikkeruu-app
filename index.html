@@ -3601,6 +3601,10 @@
           showToast('このイベントの募集は終了しました','warn');
           return;
         }
+        if(ev.recruitStart && TODAY < normalizeDateInput(ev.recruitStart)){
+          showToast('募集開始前です（'+normalizeDateInput(ev.recruitStart)+'から）','warn');
+          return;
+        }
       }
       if(eventId){
         APPLY_EVENT_ID = eventId;
@@ -6438,8 +6442,12 @@
       var partyApplyBtn = (ev.party && ev.party.enabled)
         ? '<button class="secondary" onclick="openPartyApply(\''+ev.id+'\')">交流会に申し込む</button>'
         : '';
+      var notStarted = !!(ev.recruitStart && status!=='past' && !deadlinePassed && TODAY < normalizeDateInput(ev.recruitStart));
+      var rsShort = ev.recruitStart ? (function(p){return p?((+p.split('-')[1])+'/'+(+p.split('-')[2])):'';})(normalizeDateInput(ev.recruitStart)) : '';
       var applyBtn = status==='past'
         ? '<button class="primary apply-link" onclick="openVisitorSurveyForm(\''+ev.id+'\')">⭐ 来場者アンケートに回答</button>'
+        : notStarted
+          ? '<button class="primary apply-link" disabled style="opacity:.55;cursor:not-allowed">'+rsShort+'から募集開始</button>'
         : deadlinePassed
           ? '<button class="primary apply-link" disabled style="opacity:.55;cursor:not-allowed">募集は終了しました</button>'
           : '<a class="primary apply-link" href="#apply" onclick="openApplyForEvent(\''+ev.id+'\');return false;">'+(isParticipantOnlyEvent(ev)?'参加申し込み':'出店申し込み')+'</a>';
@@ -6478,7 +6486,7 @@
           '</div>'+
           (ev.content ?'<div style="margin-top:12px"><p class="filter-label" style="margin:0 0 4px">内容</p><p class="helper" style="margin:0;white-space:pre-wrap;word-break:break-word">'+h(ev.content)+'</p></div>':'')+
           '<div class="actions application-actions">'+partyApplyBtn+applyBtn+'</div>'+
-          '<div class="actions" style="margin-top:8px"><button class="secondary" onclick="shareEventLink(\''+ev.id+'\')">🔗 このページを共有する</button></div>'+
+          '<div class="actions application-actions" style="margin-top:8px"><button class="secondary" style="width:100%" onclick="shareEventLink(\''+ev.id+'\')">🔗 このページを共有する</button></div>'+
         '</article>'+
         sectionBottomHtml;
       initDetailHeroSlider(ev.id, detailImages);
@@ -11291,18 +11299,17 @@ mikke.ruu2025@gmail.com`,
     //  当日までのタスク（開催日から逆算・バザール別に追加/編集可）  ##138
     // ============================================================
     var DEFAULT_TASK_TEMPLATE = [
-      {key:'poster',  label:'ポスター作成',                          anchor:'recruitStart', offset:-3},
-      {key:'line',    label:'グループLINE設定・注意事項・アプリ案内', anchor:'recruitStart', offset:-1},
-      {key:'recruit', label:'募集開始',                              anchor:'recruitStart', offset:0},
-      {key:'deadline',label:'募集締切',                              anchor:'deadline',     offset:0},
-      {key:'confirm', label:'出店確定・LINE招待開始',                anchor:'deadline',     offset:1},
-      {key:'eyecatch',label:'アイキャッチ提出',                      anchor:'deadline',     offset:10},
-      {key:'zoomInfo',label:'Zoom説明会の案内',                      anchor:'event',        offset:-14},
-      {key:'zoom',    label:'Zoom説明会（日程調整）',                anchor:'event',        offset:-7},
-      {key:'zoomDay', label:'Zoom当日の案内',                        anchor:'event',        offset:-7},
-      {key:'preday',  label:'開催前日の案内',                        anchor:'event',        offset:-1},
-      {key:'eventday',label:'開催当日',                              anchor:'event',        offset:0},
-      {key:'thanks',  label:'お礼・アンケート・アルバム',            anchor:'event',        offset:1}
+      {key:'line',      label:'LINE設定・チラシ作成締切',   anchor:'event', offset:-33},
+      {key:'recruit',   label:'募集開始',                   anchor:'event', offset:-30},
+      {key:'deadline',  label:'募集終了',                   anchor:'event', offset:-23},
+      {key:'confirm',   label:'確定メール・LINE招待',       anchor:'event', offset:-22},
+      {key:'eyecatch',  label:'アイキャッチ締切',           anchor:'event', offset:-15},
+      {key:'zoomInfo',  label:'Zoom説明会の案内',           anchor:'event', offset:-14},
+      {key:'zoomRemind',label:'Zoom説明会リマインド',       anchor:'event', offset:-8},
+      {key:'zoom',      label:'Zoom説明会',                 anchor:'event', offset:-7},
+      {key:'preday',    label:'前日お知らせ',               anchor:'event', offset:-1},
+      {key:'eventday',  label:'開催当日',                   anchor:'event', offset:0},
+      {key:'thanks',    label:'お礼・アンケート・アルバム',  anchor:'event', offset:1}
     ];
     function getTaskTemplate(){
       return (ORG_SETTINGS && Array.isArray(ORG_SETTINGS.taskTemplate) && ORG_SETTINGS.taskTemplate.length)
@@ -11472,8 +11479,8 @@ mikke.ruu2025@gmail.com`,
       if(!d){ showToast('先に開催日を設定してください','warn'); return; }
       if(!confirm('開催日（'+_taskFmt(d)+'）から逆算して、募集開始・締切・アイキャッチ締切・Zoom日とタスク一覧を作成します。よろしいですか？')) return;
       ev.recruitStart = _taskAddDays(d,-30);
-      ev.deadline = _taskAddDays(ev.recruitStart,7);
-      ev.eyecatchDeadline = _taskAddDays(ev.deadline,10);
+      ev.deadline = _taskAddDays(d,-23);
+      ev.eyecatchDeadline = _taskAddDays(d,-15);
       ev.zoomDate = _taskAddDays(d,-7);
       regenerateEventTasks(ev);
       _refreshTaskRows(ev); _persistEventTasks(ev);
@@ -12111,7 +12118,7 @@ mikke.ruu2025@gmail.com`,
         '<label style="font-size:11px;font-weight:900;color:var(--sub)">イベント内容<input class="input" id="ee-content" value="'+esc(ev.content)+'" placeholder="例：ハンドメイドマルシェ、ランチ会、交流会など"></label>'+
         '<label style="font-size:11px;font-weight:900;color:var(--sub)">イベント名<input class="input" id="ee-name" value="'+esc(ev.name)+'"></label>'+
         '<div style="display:grid;grid-template-columns:2fr 1fr;gap:8px">'+
-          '<label style="font-size:11px;font-weight:900;color:var(--sub)">開催日<input class="input" id="ee-date" type="date" value="'+esc(ev.date)+'" onchange="updateEEDow()"></label>'+
+          '<label style="font-size:11px;font-weight:900;color:var(--sub)">開催日<input class="input" id="ee-date" type="date" value="'+esc(ev.date)+'" onchange="updateEEDow();autofillEEScheduleFromDate(false)"></label>'+
           '<label style="font-size:11px;font-weight:900;color:var(--sub)">曜日（自動）<input class="input" id="ee-dow" value="'+esc(ev.dayOfWeek)+'" readonly></label>'+
         '</div>'+
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+
@@ -12139,6 +12146,11 @@ mikke.ruu2025@gmail.com`,
           '</div>'+
           '<p class="helper" style="margin-top:5px;font-size:10px">合計が定員になります（自動）</p>'+
         '</label>'+
+        '<div id="ee-bazaar-recruit-row" style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end">'+
+          '<label style="font-size:11px;font-weight:900;color:var(--sub)">募集開始日<input class="input" id="ee-recruit-start" type="date" value="'+esc(ev.recruitStart||'')+'"></label>'+
+          '<button type="button" onclick="autofillEEScheduleFromDate(true)" style="padding:9px 12px;border-radius:10px;background:#fff;border:1px solid var(--ruu);color:var(--ruu);font-weight:900;font-size:11px;cursor:pointer;white-space:nowrap;height:fit-content">🗓 開催日から自動入力</button>'+
+        '</div>'+
+        '<p class="helper" style="font-size:10px;color:var(--sub);margin:-2px 0 0">＊ 募集開始日まで出店申込ボタンは押せません（「募集開始前」表示）。開催日を入れると 募集開始30日前／募集終了23日前／アイキャッチ15日前／Zoom7日前 が自動で入ります（編集可）。</p>'+
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+
           '<label style="font-size:11px;font-weight:900;color:var(--sub)">募集締切日<input class="input" id="ee-deadline" type="date" value="'+esc(ev.deadline)+'"></label>'+
           '<label id="ee-bazaar-eyedeadline" style="font-size:11px;font-weight:900;color:var(--sub)">アイキャッチ期限<input class="input" id="ee-eyedeadline" type="date" value="'+esc(ev.eyecatchDeadline)+'"></label>'+
@@ -12257,6 +12269,7 @@ mikke.ruu2025@gmail.com`,
       setDisplay('ee-bazaar-fee', !isEvent);
       setDisplay('ee-bazaar-cap', !isEvent);
       setDisplay('ee-bazaar-eyedeadline', !isEvent);
+      setDisplay('ee-bazaar-recruit-row', !isEvent, 'grid');
       setDisplay('ee-bazaar-zoom-row1', !isEvent, 'grid');
       setDisplay('ee-bazaar-zoom-row2', !isEvent, 'grid');
       setDisplay('ee-bazaar-linegroup', !isEvent);
@@ -12321,6 +12334,7 @@ mikke.ruu2025@gmail.com`,
         payment: v('ee-payment') || '当日現金',
         feeOptions: feeOptions,
         capacities: capacities,
+        recruitStart: kind==='イベント' ? '' : v('ee-recruit-start'),
         deadline: v('ee-deadline'),
         eyecatchDeadline: kind==='イベント' ? '' : v('ee-eyedeadline'),
         zoomDate: kind==='イベント' ? '' : v('ee-zoom-date'),
@@ -12377,6 +12391,7 @@ mikke.ruu2025@gmail.com`,
       setValue('ee-cap-food', (draft.capacities||{}).food);
       setValue('ee-cap-session', (draft.capacities||{}).session);
       setValue('ee-cap-treatment', (draft.capacities||{}).treatment);
+      setValue('ee-recruit-start', draft.recruitStart);
       setValue('ee-deadline', draft.deadline);
       setValue('ee-eyedeadline', draft.eyecatchDeadline);
       setValue('ee-zoom-date', draft.zoomDate);
@@ -12547,6 +12562,19 @@ mikke.ruu2025@gmail.com`,
         var dow=document.getElementById('ee-dow');if(dow) dow.value=wk[dt.getDay()];
       }catch(e){}
     }
+    // 開催日から基本日程を自動入力（force=true で上書き / false は空欄のみ補完）
+    function autofillEEScheduleFromDate(force){
+      var d = normalizeDateInput((document.getElementById('ee-date')||{value:''}).value);
+      if(!d) return;
+      var setIf = function(id, val){
+        var el=document.getElementById(id); if(!el) return;
+        if(force || !el.value) el.value = val;
+      };
+      setIf('ee-recruit-start', _taskAddDays(d,-30));
+      setIf('ee-deadline',      _taskAddDays(d,-23));
+      setIf('ee-eyedeadline',   _taskAddDays(d,-15));
+      setIf('ee-zoom-date',     _taskAddDays(d,-7));
+    }
     function saveEventEdit(id, useDraft){
       var ev = EVENTS.find(function(x){return x.id===id});
       if(!ev) return;
@@ -12580,6 +12608,7 @@ mikke.ruu2025@gmail.com`,
           session: (draft.capacities&&draft.capacities.session)||0,
           treatment: (draft.capacities&&draft.capacities.treatment)||0
         };
+        ev.recruitStart = draft.recruitStart || '';
         ev.deadline = draft.deadline || '';
         ev.eyecatchDeadline = draft.eyecatchDeadline || '';
         ev.zoomDate = draft.zoomDate || '';
