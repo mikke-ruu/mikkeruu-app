@@ -3490,7 +3490,7 @@
       if(!sb){ showToast('ログインを利用できません','warn'); return; }
       try{
         var redirectTo = (location.origin||'')+location.pathname+'#mypage';
-        var res = await sb.auth.signInWithOtp({ email:email, options:{ emailRedirectTo:redirectTo, shouldCreateUser:true } });
+        var res = await sb.auth.signInWithOtp({ email:email, options:{ emailRedirectTo:redirectTo, shouldCreateUser:false } });
         if(res.error) throw res.error;
         showToast('メールを送りました。リンクを押すか、認証コード（数字）を下に入力してください。','success');
         var otpRow = document.getElementById('mypage-otp-row');
