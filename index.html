@@ -1530,7 +1530,7 @@
               <span style="width:32px;height:32px;border-radius:11px;background:#f3f0ff;display:grid;place-items:center"><svg class="icon" style="width:17px;height:17px;color:var(--ruu)"><use href="#i-calendar"/></svg></span>
               <span style="font-size:11px;font-weight:850;color:var(--ink)">詳細</span>
             </button>
-            <button onclick="openAdminPanelForce('admin-eyecatch')" style="display:grid;justify-items:center;gap:5px;padding:11px 6px;border-radius:14px;border:1px solid var(--line);background:#fff;cursor:pointer">
+            <button onclick="openEyecatchPanelFromDashboard()" style="display:grid;justify-items:center;gap:5px;padding:11px 6px;border-radius:14px;border:1px solid var(--line);background:#fff;cursor:pointer">
               <span style="width:32px;height:32px;border-radius:11px;background:#f3f0ff;display:grid;place-items:center"><svg class="icon" style="width:17px;height:17px;color:var(--ruu)"><use href="#i-download"/></svg></span>
               <span style="font-size:11px;font-weight:850;color:var(--ink)">アイキャッチDL</span>
             </button>
@@ -8464,9 +8464,23 @@ mikke.ruu2025@gmail.com`,
       if(!ev || !ev.key){showToast('対象バザールがありません','warn');return;}
       openEventInListById(ev.key);
     }
+    function openEyecatchPanelFromDashboard(){
+      var dashEv = typeof getCurrentDashboardEvent==='function' ? getCurrentDashboardEvent() : null;
+      if(dashEv && dashEv.key){
+        var sel = document.getElementById('eyecatch-event-filter');
+        if(sel && sel.value !== dashEv.key){
+          sel.value = dashEv.key;
+          if(typeof changeEyecatchEvent==='function') changeEyecatchEvent(sel);
+        }
+      }
+      openAdminPanelForce('admin-eyecatch');
+    }
     function openEventInListById(eventId){
       if(!eventId){showToast('対象イベントがありません','warn');return;}
       closeAdminPanel();
+      // ダッシュボードから飛ぶ場合はフィルタをリセット（直前の絞り込みに引っ張られるバグ対策）
+      if(typeof __eventListKind !== 'undefined') __eventListKind = 'all';
+      if(typeof eventListFilter !== 'undefined') eventListFilter = 'all';
       renderEventList(); // 最新データでカードを再構築してから開く（データ未反映・スクロール不安定の対策）
       setTimeout(function(){
         openAdminPanelForce('admin-event-list');
