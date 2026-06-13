@@ -2424,6 +2424,19 @@
       };
     }
     async function loadPublicEventsFromSupabase(){
+      var EVENTS_CACHE_KEY = 'mikke_events_cache_v1';
+      try{
+        var cached = localStorage.getItem(EVENTS_CACHE_KEY);
+        if(cached){
+          var cachedEvents = JSON.parse(cached);
+          if(Array.isArray(cachedEvents) && cachedEvents.length){
+            cachedEvents.forEach(function(ev){ upsertSupabaseEvent(EVENTS, ev); });
+            EVENTS_LOADED = true;
+            syncPublicEventViews();
+            renderEventList();
+          }
+        }
+      }catch(e){}
       var sb = getSupabaseClient();
       if(!sb){ EVENTS_LOADING = false; return false; }
       try{
@@ -2443,6 +2456,7 @@
         EVENTS_LOADING = false;
         EVENTS_LOADED = true;
         normalizeEventDefaults();
+        try{ localStorage.setItem(EVENTS_CACHE_KEY, JSON.stringify(EVENTS)); }catch(e){}
         syncPublicEventViews();
         renderEventList();
         renderAdminEventOnlyList();
@@ -2460,7 +2474,7 @@
         if(!window.__eventsLoadRetried){
           window.__eventsLoadRetried = true;
           return new Promise(function(resolve){
-            setTimeout(function(){ resolve(loadPublicEventsFromSupabase()); }, 1500);
+            setTimeout(function(){ resolve(loadPublicEventsFromSupabase()); }, 800);
           });
         }
         EVENTS_LOADING = false;
