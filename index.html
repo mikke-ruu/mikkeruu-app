@@ -13375,9 +13375,12 @@ mikke.ruu2025@gmail.com`,
       bindApplyDraftEvents();
       tryLoginByUrlToken();
       initSupabaseAuthFromUrl()
+        .then(loadPublicEventsFromSupabase)
         .then(function(){
-          // 全フェッチを並列実行（events と他のフェッチを同時に開始）
-          var eventsPromise = loadPublicEventsFromSupabase();
+          // events ロード完了後にホーム画面を確実に再描画（安全ネット）
+          syncPublicEventViews();
+          renderHomeNotices();
+          // events 完了後は残りを並列実行
           var userChain = loadCurrentUserApplicationsFromSupabase({silent:true}).then(function(){
             // マイページの初回確認完了 → ローディング表示を解除して再描画
             MYPAGE_HYDRATING = false;
@@ -13389,7 +13392,6 @@ mikke.ruu2025@gmail.com`,
             return loadAdminMailLogsFromSupabase({silent:true});
           });
           return Promise.all([
-            eventsPromise,
             loadPublicNoticesFromSupabase(),
             userChain,
             adminChain,
