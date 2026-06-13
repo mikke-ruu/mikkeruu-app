@@ -2073,6 +2073,7 @@
     var APPLICATIONS = [];
     var PARTY_APPLICATIONS = [];
     var EVENTS_LOADING = true; // Supabaseからの初回イベント読み込みが終わるまで true
+    var EVENTS_LOADED = false;
     var MYPAGE_HYDRATING = true; // ログイン状態・自分の申込の初回確認が終わるまで true（マイページのローディング表示用）
     var MAIL_LOGS = [];
     var TEXT_SCALE_KEY = 'mikke_text_scale_v1';
@@ -2440,6 +2441,7 @@
         if(res.error) throw res.error;
         (res.data||[]).forEach(function(row){ upsertSupabaseEvent(EVENTS, mapSupabaseEventRow(row)); });
         EVENTS_LOADING = false;
+        EVENTS_LOADED = true;
         normalizeEventDefaults();
         syncPublicEventViews();
         renderEventList();
@@ -2462,6 +2464,7 @@
           });
         }
         EVENTS_LOADING = false;
+        EVENTS_LOADED = true;
         syncPublicEventViews();
         showToast('イベントの読み込みに失敗しました。通信環境をご確認のうえ再読み込みしてください。', 'warn');
         return false;
@@ -2715,6 +2718,7 @@
     async function loadAlbumsFromSupabase(){
       var sb = getSupabaseClient();
       if(!sb) return false;
+      ALBUMS_LOADED = false;
       try{
         var res = await sb.from('albums')
           .select('id,title,subtitle,type,event_id,cover_photo_url,created_at')
@@ -2724,6 +2728,7 @@
         if(!albumRows.length){
           // Supabaseが空＝アルバムなし（削除済みが端末に残らないようクリア）
           ALBUMS = [];
+          ALBUMS_LOADED = true;
           renderAlbums(); renderHomeAlbums(); renderAdminAlbums();
           return true;
         }
@@ -2755,9 +2760,11 @@
             source: 'supabase'
           };
         });
+        ALBUMS_LOADED = true;
         renderAlbums(); renderHomeAlbums(); renderAdminAlbums();
         return true;
       }catch(e){
+        ALBUMS_LOADED = true;
         console.warn('loadAlbumsFromSupabase failed:', e.message||e);
         return false;
       }
@@ -2877,6 +2884,7 @@
             if(existing) n.read = !!existing.read;
             upsertById(NOTICES, n);
           });
+          NOTICES_LOADED = true;
           if(typeof renderHomeNotices==='function') renderHomeNotices();
           if(typeof renderNews==='function') renderNews();
           if(typeof updateMypageNoticeCount==='function') updateMypageNoticeCount();
@@ -6642,6 +6650,10 @@
     }
 
 
+    function fmtAppliedDate(d){
+      if(!d) return '';
+      return d.replace(/-(\d{2})/g, function(m,p1){return '.'+parseInt(p1,10);});
+    }
     function buildMypageAppDetailHtml(app, ev){
       if(!app) return '';
       var isEv = isParticipantOnlyEvent(ev);
@@ -6652,6 +6664,7 @@
       if(isEv){
         return receiptBtn+'<details class="app-confirm-details" open><summary>申込内容</summary>'+
           '<div class="app-confirm-grid">'+
+          (app.createdAt?'<div class="app-confirm-row"><span>申込日</span><span>'+fmtAppliedDate(app.createdAt)+'</span></div>':'')+
           '<div class="app-confirm-row"><span>お名前</span><span>'+h(app.personname||'-')+'</span></div>'+
           '<div class="app-confirm-row"><span>参加人数</span><span>'+(parseInt(app.attendeeCount||0,10)||1)+'名</span></div>'+
           '<div class="app-confirm-row"><span>参加費</span><span>'+h(feeLabel)+'</span></div>'+
@@ -6677,6 +6690,7 @@
           '</div>'+
           '<details class="app-confirm-details" open><summary>申込内容・編集</summary>'+
           '<div class="app-confirm-grid">'+
+          (app.createdAt?'<div class="app-confirm-row"><span>申込日</span><span>'+fmtAppliedDate(app.createdAt)+'</span></div>':'')+
           '<div class="app-confirm-row"><span>屋号</span><span>'+h(app.shopname||'-')+'</span></div>'+
           '<div class="app-confirm-row"><span>ジャンル</span><span>'+h(getApplyCategoryLabel(app.category)||'-')+'</span></div>'+
           '<div class="app-confirm-row full"><span>出店内容</span><span>'+h(app.content||'-')+'</span></div>'+
@@ -9429,6 +9443,7 @@ mikke.ruu2025@gmail.com`,
     // event-exhibitors の場合は targetEvent も持つ
     // individual の場合は targetPerson も持つ
     var NOTICES = [];
+    var NOTICES_LOADED = false;
 
     function uid(){return 'n-'+Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
     function todayStr(){var d=new Date();return d.getFullYear()+'.'+(d.getMonth()+1)+'.'+d.getDate()}
@@ -9531,7 +9546,7 @@ mikke.ruu2025@gmail.com`,
       var host = document.getElementById('home-news-list');
       if(!host) return;
       var list = NOTICES.filter(function(n){return n.channel==='public' || n.channel==='app-update'}).slice(0,3);
-      if(!list.length){host.innerHTML='<p class="helper" style="text-align:center;padding:20px 0">お知らせはありません</p>';return}
+      if(!list.length){host.innerHTML='<p class="helper" style="text-align:center;padding:20px 0">'+(NOTICES_LOADED?'お知らせはありません':'読み込み中…')+'</p>';return}
       host.innerHTML = list.map(function(n){return buildNoticeCard(n)}).join('');
     }
 
@@ -11746,7 +11761,7 @@ mikke.ruu2025@gmail.com`,
       var badge = document.getElementById('ev-list-count');
       if(badge) badge.textContent = list.length+'件';
       if(!list.length){
-        host.innerHTML='<p class="helper" style="text-align:center;padding:30px 0">該当するイベントはありません</p>';
+        host.innerHTML='<p class="helper" style="text-align:center;padding:30px 0">'+(EVENTS_LOADED?'該当するイベントはありません':'読み込み中…')+'</p>';
         syncPublicEventViews();
         return;
       }
@@ -12864,6 +12879,7 @@ mikke.ruu2025@gmail.com`,
 
     // 各アルバムに写真配列を持たせる
     var ALBUMS = [];
+    var ALBUMS_LOADED = false;
     var albumTab = 'all';
     var adminAlbumTab = 'all';
     var adminAlbumType = 'event';
@@ -12897,7 +12913,7 @@ mikke.ruu2025@gmail.com`,
       if(!host) return;
       var list = ALBUMS.slice();
       if(albumTab !== 'all') list = list.filter(function(a){return a.type===albumTab});
-      if(!list.length){host.innerHTML = '<p class="helper" style="grid-column:1/-1;text-align:center;padding:30px 0">該当するアルバムはありません</p>';return}
+      if(!list.length){host.innerHTML = '<p class="helper" style="grid-column:1/-1;text-align:center;padding:30px 0">'+(ALBUMS_LOADED?'該当するアルバムはありません':'読み込み中…')+'</p>';return}
       host.innerHTML = list.map(buildAlbumCard).join('');
     }
     function filterAlbumTab(btn, type){
@@ -12910,6 +12926,7 @@ mikke.ruu2025@gmail.com`,
       var host = document.getElementById('home-album-grid');
       if(!host) return;
       var list = ALBUMS.slice(0,2);
+      if(!list.length){host.innerHTML='<p class="helper" style="text-align:center;padding:20px 0">'+(ALBUMS_LOADED?'アルバムはまだありません':'読み込み中…')+'</p>';return;}
       host.innerHTML = list.map(buildAlbumCard).join('');
     }
 
@@ -13358,9 +13375,9 @@ mikke.ruu2025@gmail.com`,
       bindApplyDraftEvents();
       tryLoginByUrlToken();
       initSupabaseAuthFromUrl()
-        .then(loadPublicEventsFromSupabase)
         .then(function(){
-          // events 読込後は残りを並列実行（起動高速化: 旧=連続フェッチ → 新=並列）
+          // 全フェッチを並列実行（events と他のフェッチを同時に開始）
+          var eventsPromise = loadPublicEventsFromSupabase();
           var userChain = loadCurrentUserApplicationsFromSupabase({silent:true}).then(function(){
             // マイページの初回確認完了 → ローディング表示を解除して再描画
             MYPAGE_HYDRATING = false;
@@ -13372,6 +13389,7 @@ mikke.ruu2025@gmail.com`,
             return loadAdminMailLogsFromSupabase({silent:true});
           });
           return Promise.all([
+            eventsPromise,
             loadPublicNoticesFromSupabase(),
             userChain,
             adminChain,
