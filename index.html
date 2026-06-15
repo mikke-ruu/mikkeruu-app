@@ -2334,6 +2334,7 @@
       }catch(e){}
     }
     function loadAppState(){
+      try{
       var state = parseJsonSafe(localStorage.getItem(APP_STATE_KEY), null);
       if(state){
         if(Array.isArray(state.mailLogs)) MAIL_LOGS = state.mailLogs;
@@ -2354,6 +2355,12 @@
         applyProfileSnapshot(state.profile||null);
       }
       LOGIN_TOKENS = parseJsonSafe(localStorage.getItem(LOGIN_TOKEN_KEY), LOGIN_TOKENS || {});
+      }catch(e){
+        // LINEアプリ内ブラウザ等でlocalStorageへのアクセスがSecurityErrorを投げる環境がある。
+        // ここで例外を握り潰さないとDOMContentLoaded内の初期化処理全体が止まり、
+        // EVENTS_LOADING等のフラグが永久にtrueのまま＝画面が「読み込み中…」で固まる。
+        console.warn('loadAppState failed (localStorage blocked?):', e);
+      }
     }
     var REAL_SEED_KEY = 'mikke_real_seed_v1_done';
     function upsertById(list, item){
@@ -3401,7 +3408,7 @@
       var pwd = (document.getElementById('admin-pwd')||{value:''}).value;
       if(pwd === ADMIN_PASSWORD){
         __adminAuthed = true;
-        sessionStorage.setItem('mikke_admin_auth','1');
+        try{sessionStorage.setItem('mikke_admin_auth','1')}catch(e){}
         closeSheet();
         showToast('ログインしました','success');
         showPage('admin', true);
@@ -3413,7 +3420,7 @@
     }
     async function logoutAdmin(){
       __adminAuthed = false;
-      sessionStorage.removeItem('mikke_admin_auth');
+      try{sessionStorage.removeItem('mikke_admin_auth')}catch(e){}
       var sb = getSupabaseClient();
       if(sb){
         try{ await sb.auth.signOut(); }catch(e){}
@@ -3558,7 +3565,7 @@
         }
         __adminAuthed = true;
         if(!ADMIN_PASSWORD_REQUIRED){
-          sessionStorage.setItem('mikke_admin_auth','1');
+          try{sessionStorage.setItem('mikke_admin_auth','1')}catch(e){}
         }
       }
       var current=document.querySelector('.page.active');
@@ -10164,6 +10171,7 @@ mikke.ruu2025@gmail.com`,
     var adminTplFilter = 'all';
     var LINE_TPL_SEED_KEY = 'mikke_tpl_line_invite_v1_done';
     function ensureLineInviteTemplateOnce(){
+      try{
       if(localStorage.getItem(LINE_TPL_SEED_KEY)==='1') return;
       var exists = (TEMPLATES||[]).some(function(t){
         if(!t) return false;
@@ -10187,6 +10195,9 @@ mikke.ruu2025@gmail.com`,
       }
       localStorage.setItem(LINE_TPL_SEED_KEY, '1');
       markStateDirty();
+      }catch(e){
+        console.warn('ensureLineInviteTemplateOnce failed (localStorage blocked?):', e);
+      }
     }
 
     // タグ置換
