@@ -3408,7 +3408,7 @@
       var pwd = (document.getElementById('admin-pwd')||{value:''}).value;
       if(pwd === ADMIN_PASSWORD){
         __adminAuthed = true;
-        try{sessionStorage.setItem('mikke_admin_auth','1')}catch(e){}
+        sessionStorage.setItem('mikke_admin_auth','1');
         closeSheet();
         showToast('ログインしました','success');
         showPage('admin', true);
@@ -3420,7 +3420,7 @@
     }
     async function logoutAdmin(){
       __adminAuthed = false;
-      try{sessionStorage.removeItem('mikke_admin_auth')}catch(e){}
+      sessionStorage.removeItem('mikke_admin_auth');
       var sb = getSupabaseClient();
       if(sb){
         try{ await sb.auth.signOut(); }catch(e){}
@@ -3565,7 +3565,7 @@
         }
         __adminAuthed = true;
         if(!ADMIN_PASSWORD_REQUIRED){
-          try{sessionStorage.setItem('mikke_admin_auth','1')}catch(e){}
+          sessionStorage.setItem('mikke_admin_auth','1');
         }
       }
       var current=document.querySelector('.page.active');
@@ -7245,7 +7245,7 @@
       if(!sb) return Promise.resolve(null);
       return sb.from('surveys').insert({
         event_id: resolveSurveyEventUuid(s.eventId),
-        kind: s.type || null,
+        type: s.type || null,
         respondent_email: null,
         answers: s
       }).select('id').single().then(function(r){
@@ -7256,13 +7256,13 @@
     function loadSurveysFromSupabase(){
       var sb = getSupabaseClient();
       if(!sb) return Promise.resolve(false);
-      return sb.from('surveys').select('id,event_id,kind,answers,created_at').order('created_at',{ascending:false}).then(function(r){
+      return sb.from('surveys').select('id,event_id,type,answers,created_at').order('created_at',{ascending:false}).then(function(r){
         if(r && r.error){ console.warn('Supabase survey load failed', r.error); return false; }
         (r.data||[]).forEach(function(row){
           var obj = (row.answers && typeof row.answers==='object') ? Object.assign({}, row.answers) : {};
           obj.id = row.id;
           obj.source = 'supabase';
-          if(!obj.type && row.kind) obj.type = row.kind;
+          if(!obj.type && row.type) obj.type = row.type;
           if(typeof upsertById==='function') upsertById(SURVEYS, obj);
           else if(!SURVEYS.some(function(x){return x.id===obj.id;})) SURVEYS.push(obj);
         });
