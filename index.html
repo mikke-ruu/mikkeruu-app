@@ -793,7 +793,7 @@
     <header class="top">
       <div class="top-inner">
         <button class="icon-button" onclick="openDrawer()" aria-label="メニュー"><svg class="icon"><use href="#i-menu"/></svg></button>
-        <a class="brand-mark" href="#home" onclick="showPage('home', true)" aria-label="Mikke ruu ホーム"><img class="logo" src="./mikke-ruu-logo.png" alt="Mikke ruu"></a>
+        <a class="brand-mark" href="#home" onclick="showPage('home', true)" aria-label="Mikke ruu ホーム"><img class="logo" src="./mikke-ruu-logo.png" alt="Mikke ruu" decoding="async"></a>
         <div class="top-actions">
           <button class="icon-button" onclick="showPage('favorites')" aria-label="お気に入り一覧"><svg class="icon"><use href="#i-heart"/></svg></button>
           <a class="icon-button insta-button" id="header-insta-link" href="https://www.instagram.com/" target="_blank" rel="noopener" aria-label="Instagram"><svg class="icon"><use href="#i-instagram"/></svg></a>
@@ -1969,7 +1969,7 @@
   <div id="drawer-backdrop" class="drawer-backdrop" onclick="closeDrawer(event)">
     <aside class="drawer" aria-label="メニュー">
       <div class="drawer-head">
-        <img class="drawer-logo" src="./mikke-ruu-logo.png" alt="Mikke ruu">
+      <img class="drawer-logo" src="./mikke-ruu-logo.png" alt="Mikke ruu" loading="lazy" decoding="async">
         <button class="close" onclick="closeDrawer()">×</button>
       </div>
       <div class="drawer-menu">
@@ -2316,11 +2316,12 @@
     }
     function saveAppState(){
       var payload = {
-        mailLogs: Array.isArray(MAIL_LOGS) ? MAIL_LOGS : [],
-        notices: Array.isArray(NOTICES) ? NOTICES : [],
-        albums: Array.isArray(ALBUMS) ? ALBUMS : [],
-        templates: Array.isArray(TEMPLATES) ? TEMPLATES : [],
-        surveys: Array.isArray(SURVEYS) ? SURVEYS : [],
+        // 本番データはSupabaseを正にする。画像data URLをlocalStorageへ積むとハードリロードが極端に遅くなる。
+        mailLogs: [],
+        notices: [],
+        albums: [],
+        templates: [],
+        surveys: [],
         surveyTemplates: SURVEY_TEMPLATES || {},
         faqs: Array.isArray(FAQS) ? FAQS : [],
         currentUserRole: CURRENT_USER_ROLE || 'general',
@@ -2342,7 +2343,12 @@
     }
     function loadAppState(){
       try{
-      var state = parseJsonSafe(localStorage.getItem(APP_STATE_KEY), null);
+      var rawState = localStorage.getItem(APP_STATE_KEY);
+      if(rawState && rawState.length > 500000){
+        localStorage.removeItem(APP_STATE_KEY);
+        rawState = null;
+      }
+      var state = parseJsonSafe(rawState, null);
       if(state){
         if(Array.isArray(state.mailLogs)) MAIL_LOGS = state.mailLogs;
         if(Array.isArray(state.notices)) NOTICES = state.notices;
@@ -3904,6 +3910,13 @@
         submitApplyForm();
       }
     }
+    function setApplySubmitLoading(loading){
+      var btn = document.getElementById('next-btn');
+      if(!btn) return;
+      btn.disabled = !!loading;
+      btn.textContent = loading ? '保存中...' : (isParticipantOnlyEvent(getCurrentApplyEvent()) ? '参加申込する' : '出店申込する');
+      btn.style.opacity = loading ? '0.7' : '';
+    }
     function prevApplyStep(){
       var flow = getApplyStepFlow();
       var idx = flow.indexOf(applyStep);
@@ -4329,6 +4342,26 @@
         }
       };
     }
+    function waitForSupabaseClient(timeoutMs){
+      return new Promise(function(resolve){
+        var existing = getSupabaseClient();
+        if(existing){ resolve(existing); return; }
+        var done = false;
+        var cleanup = function(){
+          window.removeEventListener('mikke:supabase-ready', onReady);
+          clearTimeout(timer);
+        };
+        var finish = function(client){
+          if(done) return;
+          done = true;
+          cleanup();
+          resolve(client || null);
+        };
+        var onReady = function(){ finish(getSupabaseClient()); };
+        window.addEventListener('mikke:supabase-ready', onReady);
+        var timer = setTimeout(function(){ finish(getSupabaseClient()); }, timeoutMs || 8000);
+      });
+    }
     // data-URL をCanvasで圧縮してBlob化（Storageアップロード用）
     function compressDataUrlToBlob(dataUrl, maxPx, quality){
       return new Promise(function(resolve){
@@ -4347,7 +4380,22 @@
       });
     }
     async function saveApplicationToSupabase(data, localAppId){
-      var sb = getSupabaseClient();
+      var sb = await waitForSupabaseClient(8000);
+      if(!sb){
+        window.__lastApplicationSaveError = '通信準備が完了していません。ページを再読み込みしてもう一度お試しください。';
+        return false;
+      }
+      var payload = buildSupabaseApplicationPayload(data);
+      if(!payload){
+        try{
+          await loadPublicEventsFromSupabase();
+        }catch(e){}
+        payload = buildSupabaseApplicationPayload(data);
+      }
+      if(!payload){
+        window.__lastApplicationSaveError = 'イベント情報の読み込みが完了していません。少し待ってからもう一度送信してください。';
+        return false;
+      }
       // アイキャッチが data-URL の場合は Storage にアップしてURL化（DB肥大・毎回の通信量を削減）
       if(sb && data && typeof data.eyecatch==='string' && data.eyecatch.indexOf('data:')===0){
         try{
@@ -4365,16 +4413,16 @@
           }
         }catch(e){ /* 失敗時は data-URL のまま保存（後方互換・SQL未実行時の安全策） */ }
       }
-      var payload = buildSupabaseApplicationPayload(data);
-      if(!sb || !payload) return false;
+      payload = buildSupabaseApplicationPayload(data);
       try{
         var res = await sb.from('applications').insert(payload);
         if(res.error) throw res.error;
-        showToast('Supabaseにも申込を保存しました', 'success');
+        window.__lastApplicationSaveError = '';
         return true;
       }catch(e){
         var msg = e && e.message ? e.message : '保存エラー';
-        showToast('Supabase保存エラー：' + msg, 'warn');
+        window.__lastApplicationSaveError = msg;
+        console.warn('Supabase application save failed:', e);
         return false;
       }
     }
@@ -4840,7 +4888,7 @@
       var eyeSel = document.getElementById('eyecatch-event-filter');
       if(eyeSel && typeof changeEyecatchEvent==='function') changeEyecatchEvent(eyeSel);
     }
-    function submitApplyForm(){
+    async function submitApplyForm(){
       var data = getApplyFormData();
       if(!data.eventId){showToast('対象イベントを選択してください','warn');return;}
       if(!data.personName){showToast('お名前を入力してください','warn');return;}
@@ -4894,6 +4942,21 @@
         adminRequest: data.adminRequest || '',
         createdAt: todayStr()
       };
+      setApplySubmitLoading(true);
+      var cloudSaved = false;
+      try{
+        cloudSaved = await saveApplicationToSupabase(data, id);
+      }catch(e){
+        window.__lastApplicationSaveError = (e && e.message) || String(e || '');
+        cloudSaved = false;
+      }
+      if(!cloudSaved){
+        setApplySubmitLoading(false);
+        showToast('まだ申込は完了していません。入力内容は残っています。通信環境を確認して、もう一度送信してください。理由：'+(window.__lastApplicationSaveError||'保存できませんでした'),'warn');
+        return;
+      }
+      localApplication.eyecatchImage = data.eyecatch || localApplication.eyecatchImage || '';
+      localApplication.eyecatch = localApplication.eyecatchImage ? '1' : '0';
       APPLICATIONS.unshift(localApplication);
       CURRENT_USER_ROLE = 'exhibitor';
       CURRENT_USER_ID = personId;
@@ -4965,11 +5028,11 @@
       resetApplyTermsAck();
       markStateDirty();
       saveAppState();
+      setApplySubmitLoading(false);
       showToast(data.isParticipantEvent ? '参加申込を受付しました' : '出店申込を受付しました','success');
       // 申込保存 → 「お申し込みありがとうございます」メール(B)を送信
       // ※ログインコードは載せない。ログインしたい時にマイページからコードを取得する導線。
       (async function(){
-        try{ await saveApplicationToSupabase(data, id); }catch(e){}
         var sb = getSupabaseClient();
         if(!sb || !data.email) return;
         var evObj = (EVENTS||[]).find(function(e){return e.id===data.eventId;});
@@ -6973,7 +7036,7 @@
         var thumbClass = hasFl ? 'ev-portrait-thumb' : '';
         var rowClass = 'card event-row with-fav' + (hasFl ? ' has-portrait-thumb' : '');
         return '<article class="'+rowClass+'" onclick="viewEventDetail(\''+ev.id+'\')">'+
-          '<img'+(thumbClass?' class="'+thumbClass+'"':'')+' src="'+thumbSrc+'" alt="">'+
+          '<img'+(thumbClass?' class="'+thumbClass+'"':'')+' src="'+thumbSrc+'" alt="" loading="lazy" decoding="async">'+
           '<div style="min-width:0">'+getEventKindBadgeHtml(ev)+getEventBadgeHtml(ev)+'<h2>'+ev.name+'</h2><p>'+formatEvDateShort(ev)+' '+(ev.startTime||'')+'〜'+(ev.endTime||'')+'</p>'+(ev.venue?'<p>'+ev.venue+'</p>':'')+  '</div>'+
           renderFavoriteButton(ev.id)+
         '</article>';
@@ -7002,7 +7065,7 @@
         var thumbClass = hasFl ? 'ev-portrait-thumb' : '';
         var rowClass = 'card event-row with-fav' + (hasFl ? ' has-portrait-thumb' : '');
         return '<article class="'+rowClass+'" onclick="viewEventDetail(\''+ev.id+'\')">'+
-          '<img'+(thumbClass?' class="'+thumbClass+'"':'')+' src="'+thumbSrc+'" alt="">'+
+          '<img'+(thumbClass?' class="'+thumbClass+'"':'')+' src="'+thumbSrc+'" alt="" loading="lazy" decoding="async">'+
           '<div>'+getEventKindBadgeHtml(ev)+getEventBadgeHtml(ev)+'<h2>'+ev.name+'</h2><p>'+formatEvDateShort(ev)+' '+(ev.startTime||'')+'〜'+(ev.endTime||'')+'</p><p>'+(ev.venue||'')+'</p></div>'+
           renderFavoriteButton(ev.id)+
         '</article>';
@@ -7045,7 +7108,7 @@
           var thumbClass = hasFl ? 'ev-portrait-thumb' : '';
           var rowClass = 'card event-row with-fav' + (hasFl ? ' has-portrait-thumb' : '');
           return '<article class="'+rowClass+'" onclick="viewEventDetail(\''+ev.id+'\')">'+
-            '<img'+(thumbClass?' class="'+thumbClass+'"':'')+' src="'+thumbSrc+'" alt="">'+
+            '<img'+(thumbClass?' class="'+thumbClass+'"':'')+' src="'+thumbSrc+'" alt="" loading="lazy" decoding="async">'+
             '<div style="min-width:0">'+getEventKindBadgeHtml(ev)+getEventBadgeHtml(ev)+'<div class="row-title"><h2>'+ev.name+'</h2><svg class="icon row-chevron"><use href="#i-chevron"/></svg></div><p>'+formatEvDateShort(ev)+' '+(ev.startTime||'')+'〜'+(ev.endTime||'')+'</p>'+(ev.venue?'<p>'+ev.venue+'</p>':'')+  '</div>'+
             renderFavoriteButton(ev.id)+
           '</article>';
@@ -9553,8 +9616,8 @@ mikke.ruu2025@gmail.com`,
     // お知らせ一覧（HTML生成）
     function buildNoticeCard(n, opts){
       opts=opts||{};
-      var thumb = n.image ? '<img class="notice-thumb" src="'+n.image+'" alt="">' : '<img class="notice-thumb" src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22800%22 height=%22600%22%3E%3Crect width=%22800%22 height=%22600%22 fill=%22%23f0edf4%22/%3E%3C/svg%3E" alt="">';
-      var img = n.image ? '<img class="notice-image" src="'+n.image+'" alt="">' : '';
+      var thumb = n.image ? '<img class="notice-thumb" src="'+n.image+'" alt="" loading="lazy" decoding="async">' : '<img class="notice-thumb" src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22800%22 height=%22600%22%3E%3Crect width=%22800%22 height=%22600%22 fill=%22%23f0edf4%22/%3E%3C/svg%3E" alt="" loading="lazy" decoding="async">';
+      var img = n.image ? '<img class="notice-image" src="'+n.image+'" alt="" loading="lazy" decoding="async">' : '';
       var badges = '<span class="badge '+channelBadgeClass(n.channel)+'">'+channelLabel(n.channel)+'</span>';
       if(n.targetEvent){badges += '<span class="badge orange" style="margin-left:4px">'+getEventDisplayNameById(n.targetEvent, true)+'</span>'}
       if(n.targetPerson){badges += '<span class="badge mint" style="margin-left:4px">あなた宛て</span>'}
@@ -10130,9 +10193,12 @@ mikke.ruu2025@gmail.com`,
     function handleApplyEyecatchSelected(input){
       var file = input.files && input.files[0];
       if(!file) return;
-      var fr = new FileReader();
-      fr.onload = function(e){
-        var dataUrl = e.target.result;
+      showToast('画像を軽くしています...', '');
+      resizeImageToDataURL(file, 900, 0.82).then(function(dataUrl){
+        if(!dataUrl){
+          showToast('画像を読み込めませんでした。別の画像でお試しください。','warn');
+          return;
+        }
         window.__lastApplyEyecatchDataUrl = dataUrl;
         // 申込フォームのプレビュー
         var prev = document.getElementById('apply-eyecatch-preview');
@@ -10143,8 +10209,7 @@ mikke.ruu2025@gmail.com`,
         applyEyecatchToMypage(dataUrl);
         saveApplyDraftForCurrentEvent();
         showToast('アイキャッチを登録しました — マイページにも反映されます','success');
-      };
-      fr.readAsDataURL(file);
+      });
     }
 
     function setMypageEyecatchPending(){
@@ -11724,7 +11789,7 @@ mikke.ruu2025@gmail.com`,
 
       return '<div class="ev-card" id="ev-'+ev.id+'">'+
         '<div class="ev-head'+((ev.flyerImages&&ev.flyerImages[0])?' has-thumb-tall':(ev.coverImage?' has-thumb':''))+'" onclick="toggleEventListCard(\''+ev.id+'\')">'+
-          ((ev.flyerImages&&ev.flyerImages[0]) ? '<img class="ev-thumb-tall" src="'+ev.flyerImages[0]+'" alt="">' : (ev.coverImage ? '<img class="ev-thumb" src="'+ev.coverImage+'" alt="">' : ''))+
+          ((ev.flyerImages&&ev.flyerImages[0]) ? '<img class="ev-thumb-tall" src="'+ev.flyerImages[0]+'" alt="" loading="lazy" decoding="async">' : (ev.coverImage ? '<img class="ev-thumb" src="'+ev.coverImage+'" alt="" loading="lazy" decoding="async">' : ''))+
           '<div>'+
             '<h4 class="ev-title">'+dateStr+' '+ev.name+'</h4>'+
             '<p class="ev-sub">'+(ev.kind||'-')+' ／ '+(ev.venue||'-')+'</p>'+
@@ -13026,7 +13091,7 @@ mikke.ruu2025@gmail.com`,
       host.innerHTML = list.map(function(a){
         var typeLabel = a.type==='event' ? '過去イベント' : '自由';
         var cover = getAlbumCoverSrc(a);
-        return '<button class="admin-archive-tile" onclick="openAdminAlbumManage(\''+a.id+'\')"><img src="'+cover+'" alt=""><div><b>'+a.title+'</b><span>'+typeLabel+' / '+(a.photos||[]).length+'枚</span></div></button>';
+        return '<button class="admin-archive-tile" onclick="openAdminAlbumManage(\''+a.id+'\')"><img src="'+cover+'" alt="" loading="lazy" decoding="async"><div><b>'+a.title+'</b><span>'+typeLabel+' / '+(a.photos||[]).length+'枚</span></div></button>';
       }).join('');
     }
     function filterAdminAlbums(btn, type){
