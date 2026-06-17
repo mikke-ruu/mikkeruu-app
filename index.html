@@ -5010,7 +5010,19 @@
           loadAdminInquiriesFromSupabase({silent:true});
         }
         if(id==='admin-survey' && typeof renderAdminSurveys==='function'){
-          renderAdminSurveys();
+          Promise.all([
+            typeof loadSurveysFromSupabase==='function' ? loadSurveysFromSupabase() : Promise.resolve(false),
+            typeof loadSurveyTemplatesFromSupabase==='function' ? loadSurveyTemplatesFromSupabase() : Promise.resolve(false)
+          ]).then(function(){
+            renderAdminSurveys();
+            if(typeof renderAdminSurveyPanel==='function') renderAdminSurveyPanel();
+          });
+        }
+        if(id==='admin-faq' && typeof loadFaqsFromSupabase==='function'){
+          loadFaqsFromSupabase();
+        }
+        if(id==='admin-template' && typeof loadTemplatesFromSupabase==='function'){
+          loadTemplatesFromSupabase();
         }
       }else{
         if(backdrop) backdrop.classList.remove('open');
@@ -7544,83 +7556,99 @@ mikke.ruu2025@gmail.com`;
         '</div>'
       );
     }
-    function submitVisitorSurvey(eventId, submitBtn){
-      if(__surveySubmitting) return;
-      __surveySubmitting = true;
-      if(submitBtn){
-        submitBtn.disabled = true;
-        submitBtn.textContent = '送信中...';
-        submitBtn.style.opacity = '0.7';
-      }
-      var collected = collectSurveyAnswers('visitor');
-      if(collected.missing){
-        __surveySubmitting = false;
-        if(submitBtn){
-          submitBtn.disabled = false;
-          submitBtn.textContent = '送信する';
-          submitBtn.style.opacity = '';
-        }
-        showToast(collected.missing+'を入力してください','warn');
-        return;
-      }
-      var rating = parseInt(collected.answers.rating)||0;
-      var s = {
-        id:'s-'+Date.now().toString(36), eventId:eventId, type:'visitor',
-        date:todayStr(), visitDate:(document.getElementById('sv-visit-date')||{value:todayStr()}).value,
-        rating:rating, answers:collected.answers,
-        goodPoint:collected.answers.goodPoint || '',
-        improvePoint:collected.answers.improvePoint || '',
-        comment:collected.answers.comment || ''
-      };
-      SURVEYS.push(s);
-      saveSurveyToSupabase(s).then(function(sid){ if(sid){ s.id=sid; s.source='supabase'; } else { console.warn('[survey] Supabase未保存 - RLSポリシー確認要', window.__lastSurveyInsertError); } }); // Supabaseに集約（多端末同期）
-      window.__svRatings = {};
-      markStateDirty();
-      saveAppState();
-      __surveySubmitting = false;
-      showToast('ご協力ありがとうございました！','success');
-      openSurveyThanksSheet('visitor', eventId);
-      renderAdminSurveyPanel();
+    function setSurveySubmitButton(btn, loading){
+      if(!btn) return;
+      btn.disabled = !!loading;
+      btn.textContent = loading ? '送信中...' : '送信する';
+      btn.style.opacity = loading ? '0.7' : '';
     }
-    function submitExhibitorSurvey(eventId, submitBtn){
+    async function submitVisitorSurvey(eventId, submitBtn){
       if(__surveySubmitting) return;
       __surveySubmitting = true;
-      if(submitBtn){
-        submitBtn.disabled = true;
-        submitBtn.textContent = '送信中...';
-        submitBtn.style.opacity = '0.7';
-      }
-      var collected = collectSurveyAnswers('exhibitor');
-      if(collected.missing){
-        __surveySubmitting = false;
-        if(submitBtn){
-          submitBtn.disabled = false;
-          submitBtn.textContent = '送信する';
-          submitBtn.style.opacity = '';
+      setSurveySubmitButton(submitBtn, true);
+      try{
+        var collected = collectSurveyAnswers('visitor');
+        if(collected.missing){
+          showToast(collected.missing+'を入力してください','warn');
+          return;
         }
-        showToast(collected.missing+'を入力してください','warn');
-        return;
+        var rating = parseInt(collected.answers.rating)||0;
+        var s = {
+          id:'s-'+Date.now().toString(36), eventId:eventId, type:'visitor',
+          date:todayStr(), visitDate:(document.getElementById('sv-visit-date')||{value:todayStr()}).value,
+          rating:rating, answers:collected.answers,
+          goodPoint:collected.answers.goodPoint || '',
+          improvePoint:collected.answers.improvePoint || '',
+          comment:collected.answers.comment || ''
+        };
+        var sid = await saveSurveyToSupabase(s).catch(function(e){
+          console.warn('[survey] Supabase保存エラー', e);
+          window.__lastSurveyInsertError = (e && e.message) || String(e || '');
+          return null;
+        });
+        if(!sid){
+          console.warn('[survey] Supabase未保存 - RLSポリシー確認要', window.__lastSurveyInsertError);
+          showToast('まだ送信は完了していません。入力内容は残っています。通信環境を確認して、もう一度「送信する」を押してください。','warn');
+          return;
+        }
+        s.id = sid;
+        s.source = 'supabase';
+        SURVEYS.push(s);
+        window.__svRatings = {};
+        markStateDirty();
+        saveAppState();
+        showToast('ご協力ありがとうございました！','success');
+        openSurveyThanksSheet('visitor', eventId);
+        renderAdminSurveyPanel();
+      } finally {
+        __surveySubmitting = false;
+        setSurveySubmitButton(submitBtn, false);
       }
-      var answers = sanitizeAnonymousExhibitorAnswers(collected.answers);
-      var rating = parseInt(answers.rating)||0;
-      var s = {
-        id:'s-'+Date.now().toString(36), eventId:eventId, type:'exhibitor',
-        date:todayStr(), rating:rating, answers:answers,
-        anonymous:true,
-        salesFeel:answers.salesFeel || '',
-        visitorReaction:answers.visitorReaction || '',
-        improve:answers.improve || '',
-        comment:answers.comment || ''
-      };
-      SURVEYS.push(s);
-      saveSurveyToSupabase(s).then(function(sid){ if(sid){ s.id=sid; s.source='supabase'; } else { console.warn('[survey] Supabase未保存 - RLSポリシー確認要', window.__lastSurveyInsertError); } }); // Supabaseに集約（多端末同期）
-      window.__svRatings = {};
-      markStateDirty();
-      saveAppState();
-      __surveySubmitting = false;
-      showToast('ご回答ありがとうございました！','success');
-      openSurveyThanksSheet('exhibitor', eventId);
-      renderAdminSurveyPanel();
+    }
+    async function submitExhibitorSurvey(eventId, submitBtn){
+      if(__surveySubmitting) return;
+      __surveySubmitting = true;
+      setSurveySubmitButton(submitBtn, true);
+      try{
+        var collected = collectSurveyAnswers('exhibitor');
+        if(collected.missing){
+          showToast(collected.missing+'を入力してください','warn');
+          return;
+        }
+        var answers = sanitizeAnonymousExhibitorAnswers(collected.answers);
+        var rating = parseInt(answers.rating)||0;
+        var s = {
+          id:'s-'+Date.now().toString(36), eventId:eventId, type:'exhibitor',
+          date:todayStr(), rating:rating, answers:answers,
+          anonymous:true,
+          salesFeel:answers.salesFeel || '',
+          visitorReaction:answers.visitorReaction || '',
+          improve:answers.improve || '',
+          comment:answers.comment || ''
+        };
+        var sid = await saveSurveyToSupabase(s).catch(function(e){
+          console.warn('[survey] Supabase保存エラー', e);
+          window.__lastSurveyInsertError = (e && e.message) || String(e || '');
+          return null;
+        });
+        if(!sid){
+          console.warn('[survey] Supabase未保存 - RLSポリシー確認要', window.__lastSurveyInsertError);
+          showToast('まだ送信は完了していません。入力内容は残っています。通信環境を確認して、もう一度「送信する」を押してください。','warn');
+          return;
+        }
+        s.id = sid;
+        s.source = 'supabase';
+        SURVEYS.push(s);
+        window.__svRatings = {};
+        markStateDirty();
+        saveAppState();
+        showToast('ご回答ありがとうございました！','success');
+        openSurveyThanksSheet('exhibitor', eventId);
+        renderAdminSurveyPanel();
+      } finally {
+        __surveySubmitting = false;
+        setSurveySubmitButton(submitBtn, false);
+      }
     }
 
     // 管理側：アンケート結果パネル（イベントごとに見られる）
@@ -13402,38 +13430,42 @@ mikke.ruu2025@gmail.com`,
       tryLoginByUrlToken();
       // キャッシュ即時描画（認証チェーンを待たない - PWA・再訪ユーザー高速化）
       (function(){try{var _evc=localStorage.getItem('mikke_events_cache_v1');if(_evc&&!EVENTS_LOADED){var _evcs=JSON.parse(_evc);if(Array.isArray(_evcs)&&_evcs.length){_evcs.forEach(function(ev){if(typeof upsertSupabaseEvent==='function')upsertSupabaseEvent(EVENTS,ev);});EVENTS_LOADING=false;EVENTS_LOADED=true;if(typeof syncPublicEventViews==='function')syncPublicEventViews();if(typeof renderEventList==='function')renderEventList();}}}catch(e){}})();
-      // 認証タイムアウト: 5秒以内に完了しない場合はanonymousとして続行（token refresh hang対策）
-      Promise.race([
+      // 公開表示を先に出す。認証確認が詰まってもイベント表示を待たせない。
+      var authReady = Promise.race([
         initSupabaseAuthFromUrl(),
-        new Promise(function(r){ setTimeout(r, 5000); })
+        new Promise(function(r){ setTimeout(r, 1500); })
+      ]);
+      Promise.all([
+        loadPublicEventsFromSupabase(),
+        authReady
       ])
-        .then(loadPublicEventsFromSupabase)
         .then(function(){
           // events ロード完了後にホーム画面を確実に再描画（安全ネット）
           syncPublicEventViews();
           renderHomeNotices();
-          // events 完了後は残りを並列実行
-          var userChain = loadCurrentUserApplicationsFromSupabase({silent:true}).then(function(){
-            // マイページの初回確認完了 → ローディング表示を解除して再描画
-            MYPAGE_HYDRATING = false;
-            var act = document.querySelector('.page.active');
-            if(act && act.id === 'mypage'){ fillMypagePrivFromLatest(); renderMypageEventCards(); }
-            return loadCurrentUserNoticesFromSupabase({silent:true});
-          });
-          var adminChain = loadAdminApplicationsFromSupabase({silent:true}).then(function(){
-            return loadAdminMailLogsFromSupabase({silent:true});
-          });
+          // 初期表示に必要な公開データだけ先に取得。管理・集計系はログイン後またはパネル表示時に読む。
           return Promise.all([
             loadPublicNoticesFromSupabase(),
-            userChain,
-            adminChain,
-            loadAlbumsFromSupabase(),
-            loadSurveysFromSupabase(),
             loadOrgSettingsFromSupabase(),
-            loadSurveyTemplatesFromSupabase(),
-            loadFaqsFromSupabase(),
-            loadTemplatesFromSupabase()
+            loadSurveyTemplatesFromSupabase()
           ]);
+        })
+        .then(function(){
+          if(CURRENT_USER_EMAIL){
+            loadCurrentUserApplicationsFromSupabase({silent:true}).then(function(){
+              MYPAGE_HYDRATING = false;
+              var act = document.querySelector('.page.active');
+              if(act && act.id === 'mypage'){ fillMypagePrivFromLatest(); renderMypageEventCards(); }
+              return loadCurrentUserNoticesFromSupabase({silent:true});
+            });
+          }else{
+            MYPAGE_HYDRATING = false;
+          }
+          if(CURRENT_USER_ROLE === 'admin'){
+            loadAdminApplicationsFromSupabase({silent:true}).then(function(){
+              return loadAdminMailLogsFromSupabase({silent:true});
+            });
+          }
         });
     });
     // 即実行も保険で
@@ -13446,8 +13478,13 @@ mikke.ruu2025@gmail.com`,
         if(act && act.id === 'mypage') renderMypageEventCards();
       }
     }, 8000);
-    // イベント読込フォールバック: 15秒経過しても未完了なら強制解除
-    setTimeout(function(){ if(!EVENTS_LOADED){ EVENTS_LOADING=false; EVENTS_LOADED=true; if(typeof syncPublicEventViews==='function') syncPublicEventViews(); } }, 15000);
+    // イベント読込フォールバック: 3秒経過しても空なら読み込み表示を解除
+    setTimeout(function(){
+      if(EVENTS_LOADING && !EVENTS.length){
+        EVENTS_LOADING = false;
+        if(typeof syncPublicEventViews==='function') syncPublicEventViews();
+      }
+    }, 3000);
   </script>
 </body>
 </html>
