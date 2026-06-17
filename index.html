@@ -2059,8 +2059,15 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script>
+    window.__mikkeSupabaseScriptReady = false;
+    function mikkeSupabaseScriptLoaded(){
+      window.__mikkeSupabaseScriptReady = true;
+      window.dispatchEvent(new Event('mikke:supabase-ready'));
+    }
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onload="mikkeSupabaseScriptLoaded()"></script>
+  <script async src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script>
     if('scrollRestoration' in history){history.scrollRestoration='manual'}
     let applyStep = 1;
@@ -2439,7 +2446,7 @@
           if(Array.isArray(cachedEvents) && cachedEvents.length){
             cachedEvents.forEach(function(ev){ upsertSupabaseEvent(EVENTS, ev); });
             EVENTS_LOADED = true;
-            syncPublicEventViews();
+            syncPublicEventViews(true);
             renderEventList();
           }
         }
@@ -2464,12 +2471,13 @@
         EVENTS_LOADED = true;
         normalizeEventDefaults();
         try{ localStorage.setItem(EVENTS_CACHE_KEY, JSON.stringify(EVENTS)); }catch(e){}
-        syncPublicEventViews();
+        syncPublicEventViews(true);
         renderEventList();
-        renderAdminEventOnlyList();
-        renderMypageEventCards();
-        // Supabaseイベント読込後に主催者ダッシュボードのバザールセレクタを再構築
-        if(typeof refreshAdminDashboardEventSelector==='function') refreshAdminDashboardEventSelector();
+        if(CURRENT_USER_ROLE === 'admin'){
+          renderAdminEventOnlyList();
+          if(typeof refreshAdminDashboardEventSelector==='function') refreshAdminDashboardEventSelector();
+        }
+        if(CURRENT_USER_EMAIL) renderMypageEventCards();
         // 共有URL（#event=ID）で開かれていた場合、読込完了後に詳細ページを開く
         if(__pendingEventHashKey){
           var pendEv = (EVENTS||[]).find(function(e){return e.id===__pendingEventHashKey || e.supabaseId===__pendingEventHashKey;});
@@ -2486,7 +2494,7 @@
         }
         EVENTS_LOADING = false;
         EVENTS_LOADED = true;
-        syncPublicEventViews();
+        syncPublicEventViews(true);
         showToast('イベントの読み込みに失敗しました。通信環境をご確認のうえ再読み込みしてください。', 'warn');
         return false;
       }
@@ -8803,8 +8811,14 @@ mikke.ruu2025@gmail.com`,
         updateEventNoticeTargetLabel();
       };
       window.refreshAdminDashboardEventSelector = initDashboard;
-      document.addEventListener('DOMContentLoaded', initDashboard);
-      setTimeout(initDashboard, 300);
+      document.addEventListener('DOMContentLoaded', function(){
+        var act = document.querySelector('.page.active');
+        if(act && act.id === 'admin') initDashboard();
+      });
+      setTimeout(function(){
+        var act = document.querySelector('.page.active');
+        if(act && act.id === 'admin') initDashboard();
+      }, 300);
       // 初期化時に対象イベントセレクトのchangeを拾う
       document.addEventListener('DOMContentLoaded', function(){
         var sel=document.querySelector('.admin-selector');
@@ -9023,7 +9037,10 @@ mikke.ruu2025@gmail.com`,
       var sel = document.querySelector('.admin-selector');
       if(sel) sel.addEventListener('change', updateEventNoticeTargetLabel);
     });
-    setTimeout(updateEventNoticeTargetLabel, 200);
+    setTimeout(function(){
+      var act = document.querySelector('.page.active');
+      if(act && act.id === 'admin') updateEventNoticeTargetLabel();
+    }, 200);
 
     function sendNoticeFromCard(personId, personName){
       var title = (document.getElementById('snc-title').value||'').trim();
@@ -9424,8 +9441,14 @@ mikke.ruu2025@gmail.com`,
     }
 
     // 初期化時にボタン注入＋プラン注入
-    document.addEventListener('DOMContentLoaded', function(){injectAppEditDeleteButtons();injectFeePlanInfo()});
-    setTimeout(function(){injectAppEditDeleteButtons();injectFeePlanInfo()}, 200);
+    document.addEventListener('DOMContentLoaded', function(){
+      var act = document.querySelector('.page.active');
+      if(act && act.id === 'admin'){injectAppEditDeleteButtons();injectFeePlanInfo();}
+    });
+    setTimeout(function(){
+      var act = document.querySelector('.page.active');
+      if(act && act.id === 'admin'){injectAppEditDeleteButtons();injectFeePlanInfo();}
+    }, 200);
 
     // 重複申込の動的検出（バザール・イベント共通）
     function detectAndShowDuplicates(){
@@ -13369,11 +13392,13 @@ mikke.ruu2025@gmail.com`,
       }
     }
 
-    function syncPublicEventViews(){
-      syncApplicationCardsWithEvents();
-      refreshEventLinkedSelectors();
-      if(typeof window.refreshAdminDashboardEventSelector==='function'){
-        window.refreshAdminDashboardEventSelector();
+    function syncPublicEventViews(light){
+      if(!light){
+        syncApplicationCardsWithEvents();
+        refreshEventLinkedSelectors();
+        if(typeof window.refreshAdminDashboardEventSelector==='function'){
+          window.refreshAdminDashboardEventSelector();
+        }
       }
       var fallback = getUpcomingEvent() || getFirstPublicEvent();
       if(fallback && !EVENTS.some(function(e){return e.id===CURRENT_DETAIL_EVID})){
@@ -13381,11 +13406,13 @@ mikke.ruu2025@gmail.com`,
       }
       renderHomeUpcoming();
       renderHomeFutureEvents();
-      renderFavoritesEvents();
-      renderPublicEventsPage();
-      renderDetailPage();
-      renderExhibitorsPage();
-      renderMypageEventCards();
+      var active = document.querySelector('.page.active');
+      var activeId = active && active.id;
+      if(!light || activeId==='favorites') renderFavoritesEvents();
+      if(!light || activeId==='events') renderPublicEventsPage();
+      if(!light || activeId==='detail') renderDetailPage();
+      if(!light || activeId==='exhibitors') renderExhibitorsPage();
+      if(!light || activeId==='mypage') renderMypageEventCards();
       syncFavoriteButtons();
     }
 
@@ -13413,37 +13440,32 @@ mikke.ruu2025@gmail.com`,
       syncPublicEventViews();
       saveAppState();
     }
-
-    // 初期化
-    document.addEventListener('DOMContentLoaded', function(){
-      loadAppState();
-      purgeSeedDataOnce();
-      ensureVisitorReceptionSurveyTemplateOnce();
-      ensureExhibitorAnonymousSurveyTemplateOnce();
-      clearSurveyPlaceholdersOnce();
-      ensureLineInviteTemplateOnce();
-      if(typeof applyOrgSettings==='function') applyOrgSettings();
-      if(CURRENT_USER_EMAIL) refreshCurrentUserEventsByEmail(CURRENT_USER_EMAIL);
-      renderAll();
-      bindApplyReuseEvents();
-      bindApplyDraftEvents();
-      tryLoginByUrlToken();
-      // キャッシュ即時描画（認証チェーンを待たない - PWA・再訪ユーザー高速化）
-      (function(){try{var _evc=localStorage.getItem('mikke_events_cache_v1');if(_evc&&!EVENTS_LOADED){var _evcs=JSON.parse(_evc);if(Array.isArray(_evcs)&&_evcs.length){_evcs.forEach(function(ev){if(typeof upsertSupabaseEvent==='function')upsertSupabaseEvent(EVENTS,ev);});EVENTS_LOADING=false;EVENTS_LOADED=true;if(typeof syncPublicEventViews==='function')syncPublicEventViews();if(typeof renderEventList==='function')renderEventList();}}}catch(e){}})();
-      // 公開表示を先に出す。認証確認が詰まってもイベント表示を待たせない。
+    function renderInitialPublicView(){
+      normalizeEventDefaults();
+      renderNews();
+      renderHomeNotices();
+      renderHomeUpcoming();
+      renderHomeFutureEvents();
+      renderAdminLoginState();
+      updateMypageNoticeCount();
+      syncFavoriteButtons();
+    }
+    var __publicHydrationStarted = false;
+    function hydratePublicDataAfterSupabaseReady(){
+      if(__publicHydrationStarted) return;
+      if(!getSupabaseClient()) return;
+      __publicHydrationStarted = true;
       var authReady = Promise.race([
         initSupabaseAuthFromUrl(),
-        new Promise(function(r){ setTimeout(r, 1500); })
+        new Promise(function(r){ setTimeout(r, 1200); })
       ]);
       Promise.all([
         loadPublicEventsFromSupabase(),
         authReady
       ])
         .then(function(){
-          // events ロード完了後にホーム画面を確実に再描画（安全ネット）
-          syncPublicEventViews();
+          syncPublicEventViews(true);
           renderHomeNotices();
-          // 初期表示に必要な公開データだけ先に取得。管理・集計系はログイン後またはパネル表示時に読む。
           return Promise.all([
             loadPublicNoticesFromSupabase(),
             loadOrgSettingsFromSupabase(),
@@ -13467,9 +13489,32 @@ mikke.ruu2025@gmail.com`,
             });
           }
         });
+    }
+
+    // 初期化
+    document.addEventListener('DOMContentLoaded', function(){
+      loadAppState();
+      purgeSeedDataOnce();
+      ensureVisitorReceptionSurveyTemplateOnce();
+      ensureExhibitorAnonymousSurveyTemplateOnce();
+      clearSurveyPlaceholdersOnce();
+      ensureLineInviteTemplateOnce();
+      if(typeof applyOrgSettings==='function') applyOrgSettings();
+      if(CURRENT_USER_EMAIL) refreshCurrentUserEventsByEmail(CURRENT_USER_EMAIL);
+      renderInitialPublicView();
+      bindApplyReuseEvents();
+      bindApplyDraftEvents();
+      tryLoginByUrlToken();
+      // キャッシュ即時描画（認証チェーンを待たない - PWA・再訪ユーザー高速化）
+      (function(){try{var _evc=localStorage.getItem('mikke_events_cache_v1');if(_evc&&!EVENTS_LOADED){var _evcs=JSON.parse(_evc);if(Array.isArray(_evcs)&&_evcs.length){_evcs.forEach(function(ev){if(typeof upsertSupabaseEvent==='function')upsertSupabaseEvent(EVENTS,ev);});EVENTS_LOADING=false;EVENTS_LOADED=true;if(typeof syncPublicEventViews==='function')syncPublicEventViews(true);if(typeof renderEventList==='function')renderEventList();}}}catch(e){}})();
+      if(getSupabaseClient()){
+        hydratePublicDataAfterSupabaseReady();
+      }else{
+        window.addEventListener('mikke:supabase-ready', hydratePublicDataAfterSupabaseReady, {once:true});
+      }
     });
     // 即実行も保険で
-    setTimeout(renderAll, 100);
+    setTimeout(renderInitialPublicView, 100);
     // 保険: 8秒経っても初回確認が終わらない場合はローディング表示を解除
     setTimeout(function(){
       if(MYPAGE_HYDRATING){
@@ -13482,7 +13527,7 @@ mikke.ruu2025@gmail.com`,
     setTimeout(function(){
       if(EVENTS_LOADING && !EVENTS.length){
         EVENTS_LOADING = false;
-        if(typeof syncPublicEventViews==='function') syncPublicEventViews();
+        if(typeof syncPublicEventViews==='function') syncPublicEventViews(true);
       }
     }, 3000);
   </script>
