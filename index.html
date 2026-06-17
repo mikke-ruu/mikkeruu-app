@@ -6575,7 +6575,7 @@
       var card = document.querySelector('#home > article.event-card');
       if(!card) return;
       card.onclick = null;
-      if(!ev && EVENTS_LOADING){
+      if(!ev && !EVENTS_LOADED){
         card.innerHTML =
           '<div class="event-photo"></div>'+
           '<span class="badge mint">読み込み中</span>'+
@@ -13401,8 +13401,12 @@ mikke.ruu2025@gmail.com`,
       bindApplyDraftEvents();
       tryLoginByUrlToken();
       // キャッシュ即時描画（認証チェーンを待たない - PWA・再訪ユーザー高速化）
-      (function(){try{var _evc=localStorage.getItem('mikke_events_cache_v1');if(_evc&&!EVENTS_LOADED){var _evcs=JSON.parse(_evc);if(Array.isArray(_evcs)&&_evcs.length){_evcs.forEach(function(ev){if(typeof upsertSupabaseEvent==='function')upsertSupabaseEvent(EVENTS,ev);});EVENTS_LOADED=true;if(typeof syncPublicEventViews==='function')syncPublicEventViews();if(typeof renderEventList==='function')renderEventList();}}}catch(e){}})();
-      initSupabaseAuthFromUrl()
+      (function(){try{var _evc=localStorage.getItem('mikke_events_cache_v1');if(_evc&&!EVENTS_LOADED){var _evcs=JSON.parse(_evc);if(Array.isArray(_evcs)&&_evcs.length){_evcs.forEach(function(ev){if(typeof upsertSupabaseEvent==='function')upsertSupabaseEvent(EVENTS,ev);});EVENTS_LOADING=false;EVENTS_LOADED=true;if(typeof syncPublicEventViews==='function')syncPublicEventViews();if(typeof renderEventList==='function')renderEventList();}}}catch(e){}})();
+      // 認証タイムアウト: 5秒以内に完了しない場合はanonymousとして続行（token refresh hang対策）
+      Promise.race([
+        initSupabaseAuthFromUrl(),
+        new Promise(function(r){ setTimeout(r, 5000); })
+      ])
         .then(loadPublicEventsFromSupabase)
         .then(function(){
           // events ロード完了後にホーム画面を確実に再描画（安全ネット）
@@ -13442,6 +13446,8 @@ mikke.ruu2025@gmail.com`,
         if(act && act.id === 'mypage') renderMypageEventCards();
       }
     }, 8000);
+    // イベント読込フォールバック: 15秒経過しても未完了なら強制解除
+    setTimeout(function(){ if(!EVENTS_LOADED){ EVENTS_LOADING=false; EVENTS_LOADED=true; if(typeof syncPublicEventViews==='function') syncPublicEventViews(); } }, 15000);
   </script>
 </body>
 </html>
