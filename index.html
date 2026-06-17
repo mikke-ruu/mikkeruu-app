@@ -7249,7 +7249,8 @@
         respondent_email: null,
         answers: s
       }).select('id').single().then(function(r){
-        if(r && r.error){ console.warn('Supabase survey insert failed', r.error); return null; }
+        if(r && r.error){ console.warn('Supabase survey insert failed', r.error); window.__lastSurveyInsertError = r.error.message || JSON.stringify(r.error); return null; }
+        window.__lastSurveyInsertError = null;
         return r && r.data ? r.data.id : null;
       });
     }
@@ -7572,7 +7573,7 @@ mikke.ruu2025@gmail.com`;
         comment:collected.answers.comment || ''
       };
       SURVEYS.push(s);
-      saveSurveyToSupabase(s).then(function(sid){ if(sid){ s.id=sid; s.source='supabase'; } }); // Supabaseに集約（多端末同期）
+      saveSurveyToSupabase(s).then(function(sid){ if(sid){ s.id=sid; s.source='supabase'; } else { console.warn('[survey] Supabase未保存 - RLSポリシー確認要', window.__lastSurveyInsertError); } }); // Supabaseに集約（多端末同期）
       window.__svRatings = {};
       markStateDirty();
       saveAppState();
@@ -7612,7 +7613,7 @@ mikke.ruu2025@gmail.com`;
         comment:answers.comment || ''
       };
       SURVEYS.push(s);
-      saveSurveyToSupabase(s).then(function(sid){ if(sid){ s.id=sid; s.source='supabase'; } }); // Supabaseに集約（多端末同期）
+      saveSurveyToSupabase(s).then(function(sid){ if(sid){ s.id=sid; s.source='supabase'; } else { console.warn('[survey] Supabase未保存 - RLSポリシー確認要', window.__lastSurveyInsertError); } }); // Supabaseに集約（多端末同期）
       window.__svRatings = {};
       markStateDirty();
       saveAppState();
@@ -13399,6 +13400,8 @@ mikke.ruu2025@gmail.com`,
       bindApplyReuseEvents();
       bindApplyDraftEvents();
       tryLoginByUrlToken();
+      // キャッシュ即時描画（認証チェーンを待たない - PWA・再訪ユーザー高速化）
+      (function(){try{var _evc=localStorage.getItem('mikke_events_cache_v1');if(_evc&&!EVENTS_LOADED){var _evcs=JSON.parse(_evc);if(Array.isArray(_evcs)&&_evcs.length){_evcs.forEach(function(ev){if(typeof upsertSupabaseEvent==='function')upsertSupabaseEvent(EVENTS,ev);});EVENTS_LOADED=true;if(typeof syncPublicEventViews==='function')syncPublicEventViews();if(typeof renderEventList==='function')renderEventList();}}}catch(e){}})();
       initSupabaseAuthFromUrl()
         .then(loadPublicEventsFromSupabase)
         .then(function(){
