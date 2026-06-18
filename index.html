@@ -7481,7 +7481,7 @@
         answers: answers
       };
       var insertPayload = function(p){
-        return sb.from('surveys').insert(p).select('id').single();
+        return sb.from('surveys').insert(p);
       };
       return insertPayload(payload).then(function(r){
         if(r && r.error && isMissingColumnError(r.error, 'type')){
@@ -7494,7 +7494,7 @@
       }).then(function(r){
         if(r && r.error){ console.warn('Supabase survey insert failed', r.error); window.__lastSurveyInsertError = r.error.message || JSON.stringify(r.error); return null; }
         window.__lastSurveyInsertError = null;
-        return r && r.data ? r.data.id : null;
+        return true;
       });
     }
     function loadSurveysFromSupabase(){
@@ -7828,7 +7828,7 @@ mikke.ruu2025@gmail.com`;
           showToast('まだ送信は完了していません。入力内容は残っています。通信環境を確認して、もう一度「送信する」を押してください。','warn');
           return;
         }
-        s.id = sid;
+        if(typeof sid === 'string') s.id = sid;
         s.source = 'supabase';
         SURVEYS.push(s);
         window.__svRatings = {};
@@ -7878,7 +7878,7 @@ mikke.ruu2025@gmail.com`;
           showToast('まだ送信は完了していません。入力内容は残っています。通信環境を確認して、もう一度「送信する」を押してください。','warn');
           return;
         }
-        s.id = sid;
+        if(typeof sid === 'string') s.id = sid;
         s.source = 'supabase';
         SURVEYS.push(s);
         window.__svRatings = {};
@@ -13713,7 +13713,8 @@ mikke.ruu2025@gmail.com`,
           return Promise.all([
             loadPublicNoticesFromSupabase(),
             loadOrgSettingsFromSupabase(),
-            loadSurveyTemplatesFromSupabase()
+            loadSurveyTemplatesFromSupabase(),
+            loadAlbumsFromSupabase()
           ]);
         })
         .then(function(){
@@ -13774,6 +13775,8 @@ mikke.ruu2025@gmail.com`,
         if(typeof syncPublicEventViews==='function') syncPublicEventViews(true);
       }
     }, 3000);
+    // アルバム読込フォールバック: 5秒経過してもALBUMS_LOADEDがfalseなら再試行
+    setTimeout(function(){ if(!ALBUMS_LOADED && typeof loadAlbumsFromSupabase==='function') loadAlbumsFromSupabase(); }, 5000);
   </script>
 </body>
 </html>
