@@ -4,6 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>Mikke ruu</title>
+  <link rel="preconnect" href="https://eqmhrtbfkgccdksyokqk.supabase.co" crossorigin>
+  <link rel="dns-prefetch" href="//eqmhrtbfkgccdksyokqk.supabase.co">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="//cdn.jsdelivr.net">
+  <link rel="preload" as="image" href="./mikke-ruu-logo.png">
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="apple-touch-icon" href="icon.png">
   <link rel="manifest" href="manifest.json">
@@ -2067,7 +2072,6 @@
     }
   </script>
   <script async src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onload="mikkeSupabaseScriptLoaded()"></script>
-  <script async src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script>
     if('scrollRestoration' in history){history.scrollRestoration='manual'}
     let applyStep = 1;
@@ -2086,6 +2090,8 @@
     var TEXT_SCALE_KEY = 'mikke_text_scale_v1';
     var __surveySubmitting = false;
     var APP_STATE_KEY = 'mikke_preview_state_v3';
+    var EVENTS_CACHE_KEY = 'mikke_events_cache_v1';
+    var EVENTS_CACHE_MAX_BYTES = 180000;
     var LOGIN_TOKEN_KEY = 'mikke_preview_login_tokens_v1';
     var LOGIN_LINK_BUFFER = '';
     var LOGIN_TOKENS = {};
@@ -2104,6 +2110,16 @@
     function parseJsonSafe(raw, fallback){
       if(!raw) return fallback;
       try{return JSON.parse(raw);}catch(e){return fallback;}
+    }
+    function readEventsCacheRaw(){
+      try{
+        var raw = localStorage.getItem(EVENTS_CACHE_KEY);
+        if(raw && raw.length > EVENTS_CACHE_MAX_BYTES){
+          localStorage.removeItem(EVENTS_CACHE_KEY);
+          return null;
+        }
+        return raw;
+      }catch(e){ return null; }
     }
     function getSupabaseClient(){
       if(SUPABASE_CLIENT) return SUPABASE_CLIENT;
@@ -2401,7 +2417,9 @@
       if(Number.isNaN(d.getTime())) return '';
       return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
     }
-    function mapSupabaseEventRow(row){
+    var EVENT_LIGHT_SELECT = 'id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,line_group_url,capacity,application_deadline,fee_options,capacities';
+    var EVENT_FULL_SELECT = 'id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,content,detail,cover_image_url,gallery_image_urls,line_group_url,capacity,application_deadline,fee_options,capacities,extra';
+    function mapSupabaseEventRow(row, detailsLoaded){
       var date = datePartFromIso(row.starts_at);
       var ex = (row.extra && typeof row.extra === 'object') ? row.extra : {};
       return {
@@ -2429,6 +2447,7 @@
         feeOptions: Array.isArray(row.fee_options) ? row.fee_options : [],
         capacities: row.capacities || {},
         status: row.status || 'public',
+        detailsLoaded: !!detailsLoaded,
         // extra(JSON)から復元する細かい項目
         recruitStart: ex.recruitStart || '',
         eyecatchDeadline: ex.eyecatchDeadline || '',
@@ -2444,9 +2463,8 @@
       };
     }
     async function loadPublicEventsFromSupabase(){
-      var EVENTS_CACHE_KEY = 'mikke_events_cache_v1';
       try{
-        var cached = localStorage.getItem(EVENTS_CACHE_KEY);
+        var cached = readEventsCacheRaw();
         if(cached){
           var cachedEvents = JSON.parse(cached);
           if(Array.isArray(cachedEvents) && cachedEvents.length){
@@ -2461,18 +2479,18 @@
       if(!sb){ EVENTS_LOADING = false; return false; }
       try{
         var res = await sb.from('events')
-          .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,content,detail,cover_image_url,gallery_image_urls,line_group_url,capacity,application_deadline,fee_options,capacities,extra')
+          .select(EVENT_LIGHT_SELECT)
           .in('status', CURRENT_USER_ROLE==='admin' ? ['public','closed','past','draft'] : ['public','closed','past'])
           .order('starts_at', {ascending:true});
         // 新カラム未追加の旧DB向けフォールバック
         if(res.error && res.error.message && res.error.message.indexOf('does not exist')!==-1){
           res = await sb.from('events')
-            .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,detail,cover_image_url,line_group_url,capacity,application_deadline')
+            .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,line_group_url,capacity,application_deadline')
             .in('status', CURRENT_USER_ROLE==='admin' ? ['public','closed','past','draft'] : ['public','closed','past'])
             .order('starts_at', {ascending:true});
         }
         if(res.error) throw res.error;
-        (res.data||[]).forEach(function(row){ upsertSupabaseEvent(EVENTS, mapSupabaseEventRow(row)); });
+        (res.data||[]).forEach(function(row){ upsertSupabaseEvent(EVENTS, mapSupabaseEventRow(row, false)); });
         EVENTS_LOADING = false;
         EVENTS_LOADED = true;
         normalizeEventDefaults();
@@ -3657,6 +3675,13 @@
       }
       showPage('apply');
       loadApplyDraftForEvent(getCurrentApplyEventId(), true);
+      ensureEventDetailsLoaded(getCurrentApplyEventId(), function(ok){
+        if(ok){
+          renderApplyStep();
+          loadApplyDraftForEvent(getCurrentApplyEventId(), false);
+          if(typeof renderPartyPage==='function') renderPartyPage();
+        }
+      });
     }
     function clampApplyStep(step){
       var n = parseInt(step, 10);
@@ -4425,6 +4450,43 @@
         console.warn('Supabase application save failed:', e);
         return false;
       }
+    }
+    async function loadEventDetailsFromSupabase(eventId){
+      var sb = getSupabaseClient();
+      if(!sb || !eventId) return false;
+      var existing = (EVENTS||[]).find(function(e){return e.id===eventId || e.supabaseId===eventId;});
+      if(existing && existing.detailsLoaded) return true;
+      try{
+        var q = sb.from('events').select(EVENT_FULL_SELECT).limit(1);
+        q = existing && existing.supabaseId ? q.eq('id', existing.supabaseId) : q.eq('slug', eventId);
+        var res = await q;
+        if(res.error && res.error.message && res.error.message.indexOf('does not exist')!==-1){
+          q = sb.from('events')
+            .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,detail,cover_image_url,line_group_url,capacity,application_deadline')
+            .limit(1);
+          q = existing && existing.supabaseId ? q.eq('id', existing.supabaseId) : q.eq('slug', eventId);
+          res = await q;
+        }
+        if(res.error) throw res.error;
+        var row = res.data && res.data[0];
+        if(!row) return false;
+        upsertSupabaseEvent(EVENTS, mapSupabaseEventRow(row, true));
+        return true;
+      }catch(e){
+        console.warn('loadEventDetailsFromSupabase failed:', e && (e.message||e));
+        return false;
+      }
+    }
+    function ensureEventDetailsLoaded(eventId, after){
+      var ev = (EVENTS||[]).find(function(e){return e.id===eventId || e.supabaseId===eventId;});
+      if(ev && ev.detailsLoaded){
+        if(typeof after === 'function') after(true);
+        return Promise.resolve(true);
+      }
+      return loadEventDetailsFromSupabase(eventId).then(function(ok){
+        if(typeof after === 'function') after(ok);
+        return ok;
+      });
     }
     function renderApplyConfirmation(){
       var d = getApplyFormData();
@@ -5950,12 +6012,27 @@
         setTimeout(function(){ URL.revokeObjectURL(url); },5000);
       }catch(e){ showToast('DLできませんでした: '+src.slice(0,40)); }
     }
+    var __jsZipLoading = null;
+    function ensureJSZipLoaded(){
+      if(typeof JSZip !== 'undefined') return Promise.resolve(true);
+      if(__jsZipLoading) return __jsZipLoading;
+      __jsZipLoading = new Promise(function(resolve){
+        var s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+        s.async = true;
+        s.onload = function(){ resolve(typeof JSZip !== 'undefined'); };
+        s.onerror = function(){ resolve(false); };
+        document.head.appendChild(s);
+      });
+      return __jsZipLoading;
+    }
     async function downloadEyecatchBulk(){
       var imgs=Array.from(document.querySelectorAll('#eyecatch-grid .eyecatch-item-img img'));
       if(!imgs.length){ showToast('ダウンロード対象がありません'); return; }
       var btn=document.getElementById('eyecatch-bulk-btn');
       if(btn){ btn.disabled=true; btn.style.opacity='.6'; }
-      var useZip = typeof JSZip !== 'undefined';
+      showToast('DL準備中…（'+imgs.length+'枚）');
+      var useZip = await ensureJSZipLoaded();
       showToast(useZip ? ('ZIPを作成中…（'+imgs.length+'枚）') : ('DL準備中…（'+imgs.length+'枚）'));
       var ok=0, fail=0;
       var zip = useZip ? new JSZip() : null;
@@ -6520,6 +6597,9 @@
       CURRENT_DETAIL_EVID = evId;
       showPage('detail');
       renderDetailPage();
+      ensureEventDetailsLoaded(evId, function(ok){
+        if(ok && CURRENT_DETAIL_EVID === evId) renderDetailPage();
+      });
     }
     function renderDetailPage(){
       var ev = (EVENTS||[]).find(function(e){return e.id===CURRENT_DETAIL_EVID});
@@ -13571,7 +13651,7 @@ mikke.ruu2025@gmail.com`,
       bindApplyDraftEvents();
       tryLoginByUrlToken();
       // キャッシュ即時描画（認証チェーンを待たない - PWA・再訪ユーザー高速化）
-      (function(){try{var _evc=localStorage.getItem('mikke_events_cache_v1');if(_evc&&!EVENTS_LOADED){var _evcs=JSON.parse(_evc);if(Array.isArray(_evcs)&&_evcs.length){_evcs.forEach(function(ev){if(typeof upsertSupabaseEvent==='function')upsertSupabaseEvent(EVENTS,ev);});EVENTS_LOADING=false;EVENTS_LOADED=true;if(typeof syncPublicEventViews==='function')syncPublicEventViews(true);if(typeof renderEventList==='function')renderEventList();}}}catch(e){}})();
+      (function(){try{var _evc=readEventsCacheRaw();if(_evc&&!EVENTS_LOADED){var _evcs=JSON.parse(_evc);if(Array.isArray(_evcs)&&_evcs.length){_evcs.forEach(function(ev){if(typeof upsertSupabaseEvent==='function')upsertSupabaseEvent(EVENTS,ev);});EVENTS_LOADING=false;EVENTS_LOADED=true;if(typeof syncPublicEventViews==='function')syncPublicEventViews(true);if(typeof renderEventList==='function')renderEventList();}}}catch(e){}})();
       if(getSupabaseClient()){
         hydratePublicDataAfterSupabaseReady();
       }else{
