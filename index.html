@@ -7477,7 +7477,6 @@
       var answers = Object.assign({}, s || {}, {eventUuid: evUuid || null});
       var payload = {
         type: s.type || null,
-        respondent_email: null,
         answers: answers
       };
       if(evUuid) payload.event_id = evUuid;
