@@ -2650,7 +2650,6 @@
           zoomPass:         ev.zoomPass || '',
           payment:          ev.payment || '',
           party:            ev.party || {enabled:false},
-          flyerImages:      ev.flyerImages || [],
           venuePhotos:      ev.venuePhotos || [],
           tasks:            ev.tasks || []
         }
@@ -4459,9 +4458,11 @@
               data.eyecatch = upUrl;
               var la = (APPLICATIONS||[]).find(function(a){return a.id===localAppId;});
               if(la){ la.eyecatchImage = upUrl; la.eyecatch = '1'; }
+            } else {
+              data.eyecatch = '';
             }
           }
-        }catch(e){ /* 失敗時は data-URL のまま保存（後方互換・SQL未実行時の安全策） */ }
+        }catch(e){ data.eyecatch = ''; }
       }
       payload = buildSupabaseApplicationPayload(data);
       try{
@@ -7475,11 +7476,11 @@
       var evUuid = resolveSurveyEventUuid(s.eventId);
       var answers = Object.assign({}, s || {}, {eventUuid: evUuid || null});
       var payload = {
-        event_id: evUuid,
         type: s.type || null,
         respondent_email: null,
         answers: answers
       };
+      if(evUuid) payload.event_id = evUuid;
       var insertPayload = function(p){
         return sb.from('surveys').insert(p);
       };
@@ -7825,7 +7826,8 @@ mikke.ruu2025@gmail.com`;
         });
         if(!sid){
           console.warn('[survey] Supabase未保存 - RLSポリシー確認要', window.__lastSurveyInsertError);
-          showToast('まだ送信は完了していません。入力内容は残っています。通信環境を確認して、もう一度「送信する」を押してください。','warn');
+          var _errMsg = window.__lastSurveyInsertError ? window.__lastSurveyInsertError.substring(0,80) : '不明なエラー';
+          showToast('アンケートの送信に失敗しました: '+_errMsg,'warn');
           return;
         }
         if(typeof sid === 'string') s.id = sid;
@@ -7875,7 +7877,8 @@ mikke.ruu2025@gmail.com`;
         });
         if(!sid){
           console.warn('[survey] Supabase未保存 - RLSポリシー確認要', window.__lastSurveyInsertError);
-          showToast('まだ送信は完了していません。入力内容は残っています。通信環境を確認して、もう一度「送信する」を押してください。','warn');
+          var _errMsg = window.__lastSurveyInsertError ? window.__lastSurveyInsertError.substring(0,80) : '不明なエラー';
+          showToast('アンケートの送信に失敗しました: '+_errMsg,'warn');
           return;
         }
         if(typeof sid === 'string') s.id = sid;
@@ -11618,10 +11621,6 @@ mikke.ruu2025@gmail.com`,
           var path = 'events/venue-'+(ev.supabaseId||ev.id)+'-'+Date.now()+'-'+i+'.'+ext;
           url = await uploadFileToStorage(path, f);
         }catch(e){}
-        if(!url && !isVid && typeof resizeImageToDataURL==='function'){
-          // 画像のStorage失敗時のみ圧縮data-URLフォールバック（動画は巨大化するためしない）
-          url = await resizeImageToDataURL(f, 1200, 0.8);
-        }
         if(!url){ rejected++; continue; }
         ev.venuePhotos.push(url);
       }
