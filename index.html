@@ -1530,7 +1530,7 @@
           </div>
 
           <!-- 詳細・アイキャッチDL・お知らせ（アイコン操作） -->
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
             <button onclick="openSelectedEventInList()" style="display:grid;justify-items:center;gap:5px;padding:11px 6px;border-radius:14px;border:1px solid var(--line);background:#fff;cursor:pointer">
               <span style="width:32px;height:32px;border-radius:11px;background:#f3f0ff;display:grid;place-items:center"><svg class="icon" style="width:17px;height:17px;color:var(--ruu)"><use href="#i-calendar"/></svg></span>
               <span style="font-size:11px;font-weight:850;color:var(--ink)">詳細</span>
@@ -1543,6 +1543,10 @@
               <span style="width:32px;height:32px;border-radius:11px;background:#fff5f7;display:grid;place-items:center"><svg class="icon" style="width:17px;height:17px;color:var(--ruu)"><use href="#i-bell"/></svg></span>
               <span style="font-size:11px;font-weight:850;color:var(--ink)">お知らせ</span>
               <span id="event-notice-target-label" style="display:none"></span>
+            </button>
+            <button onclick="sendDashboardEventThanks()" style="display:grid;justify-items:center;gap:5px;padding:11px 6px;border-radius:14px;border:1px solid var(--line);background:#fff;cursor:pointer">
+              <span style="width:32px;height:32px;border-radius:11px;background:#fff7f9;display:grid;place-items:center"><svg class="icon" style="width:17px;height:17px;color:var(--ruu)"><use href="#i-mail"/></svg></span>
+              <span style="font-size:11px;font-weight:850;color:var(--ink)">お礼メール</span>
             </button>
           </div>
 
@@ -2594,6 +2598,27 @@
           return '管理者ログインしていません（ログイン後に保存してください）';
         }
       }catch(se){ /* セッション取得失敗は続行してDBエラーに委ねる */ }
+      async function eventMediaUrl(src, label){
+        if(!src || typeof src !== 'string' || src.indexOf('data:') !== 0) return src || '';
+        try{
+          var blob = await compressDataUrlToBlob(src, 1200, 0.82);
+          if(!blob) return src;
+          var slug = String(ev.id || ev.slug || Date.now()).replace(/[^a-zA-Z0-9_-]/g, '-');
+          var path = 'event-media/' + slug + '/' + label + '-' + Date.now() + '.jpg';
+          return await uploadFileToStorage(path, blob) || src;
+        }catch(e){
+          console.warn('event media upload failed:', e && (e.message||e));
+          return src;
+        }
+      }
+      ev.coverImage = await eventMediaUrl(ev.coverImage || '', 'cover');
+      if(Array.isArray(ev.flyerImages)){
+        var normalizedFlyers = [];
+        for(var fi=0; fi<ev.flyerImages.length; fi++){
+          normalizedFlyers.push(await eventMediaUrl(ev.flyerImages[fi], 'flyer-' + fi));
+        }
+        ev.flyerImages = normalizedFlyers.filter(function(src){return !!src;});
+      }
       var startsAt = ev.date ? ev.date+'T'+(ev.startTime||'10:00')+':00+09:00' : null;
       var endsAt   = ev.date ? ev.date+'T'+(ev.endTime  ||'17:00')+':00+09:00' : null;
       var payload = {
@@ -4474,6 +4499,31 @@
         return true;
       }catch(e){
         console.warn('loadEventDetailsFromSupabase failed:', e && (e.message||e));
+        return false;
+      }
+    }
+    async function loadPublicEventCoversFromSupabase(){
+      var sb = getSupabaseClient();
+      if(!sb) return false;
+      try{
+        var res = await sb.from('events')
+          .select('id,slug,cover_image_url')
+          .in('status', CURRENT_USER_ROLE==='admin' ? ['public','closed','past','draft'] : ['public','closed','past']);
+        if(res.error) throw res.error;
+        var changed = false;
+        (res.data||[]).forEach(function(row){
+          if(!row || !row.cover_image_url) return;
+          var ev = (EVENTS||[]).find(function(e){return e.supabaseId===row.id || e.id===row.slug;});
+          if(ev && ev.coverImage !== row.cover_image_url){
+            ev.coverImage = row.cover_image_url;
+            ev.image = row.cover_image_url;
+            changed = true;
+          }
+        });
+        if(changed) syncPublicEventViews(true);
+        return changed;
+      }catch(e){
+        console.warn('loadPublicEventCoversFromSupabase failed:', e && (e.message||e));
         return false;
       }
     }
@@ -7403,15 +7453,45 @@
       if(ev && ev.supabaseId) return ev.supabaseId;
       return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(eventId) ? eventId : null;
     }
+    function resolveSurveyEventId(eventId, type){
+      if(eventId) return eventId;
+      if(type === 'visitor'){
+        var visitDate = normalizeDateInput((document.getElementById('sv-visit-date')||{}).value || '');
+        if(visitDate){
+          var byDate = (EVENTS||[]).find(function(e){ return normalizeDateInput(e.date||'') === visitDate; });
+          if(byDate) return byDate.id || byDate.supabaseId || '';
+        }
+      }
+      var active = getUpcomingEvent() || getFirstPublicEvent();
+      return active ? (active.id || active.supabaseId || '') : '';
+    }
+    function isMissingColumnError(err, columnName){
+      var msg = String((err && (err.message || err.details || err.hint)) || '').toLowerCase();
+      return msg.indexOf('column') >= 0 && msg.indexOf(String(columnName).toLowerCase()) >= 0;
+    }
     function saveSurveyToSupabase(s){
       var sb = getSupabaseClient();
       if(!sb) return Promise.resolve(null);
-      return sb.from('surveys').insert({
-        event_id: resolveSurveyEventUuid(s.eventId),
+      var evUuid = resolveSurveyEventUuid(s.eventId);
+      var answers = Object.assign({}, s || {}, {eventUuid: evUuid || null});
+      var payload = {
+        event_id: evUuid,
         type: s.type || null,
         respondent_email: null,
-        answers: s
-      }).select('id').single().then(function(r){
+        answers: answers
+      };
+      var insertPayload = function(p){
+        return sb.from('surveys').insert(p).select('id').single();
+      };
+      return insertPayload(payload).then(function(r){
+        if(r && r.error && isMissingColumnError(r.error, 'type')){
+          var fallback = Object.assign({}, payload);
+          fallback.kind = fallback.type;
+          delete fallback.type;
+          return insertPayload(fallback);
+        }
+        return r;
+      }).then(function(r){
         if(r && r.error){ console.warn('Supabase survey insert failed', r.error); window.__lastSurveyInsertError = r.error.message || JSON.stringify(r.error); return null; }
         window.__lastSurveyInsertError = null;
         return r && r.data ? r.data.id : null;
@@ -7421,12 +7501,17 @@
       var sb = getSupabaseClient();
       if(!sb) return Promise.resolve(false);
       return sb.from('surveys').select('id,event_id,type,answers,created_at').order('created_at',{ascending:false}).then(function(r){
+        if(r && r.error && isMissingColumnError(r.error, 'type')){
+          return sb.from('surveys').select('id,event_id,kind,answers,created_at').order('created_at',{ascending:false});
+        }
+        return r;
+      }).then(function(r){
         if(r && r.error){ console.warn('Supabase survey load failed', r.error); return false; }
         (r.data||[]).forEach(function(row){
           var obj = (row.answers && typeof row.answers==='object') ? Object.assign({}, row.answers) : {};
           obj.id = row.id;
           obj.source = 'supabase';
-          if(!obj.type && row.type) obj.type = row.type;
+          if(!obj.type && (row.type || row.kind)) obj.type = row.type || row.kind;
           if(typeof upsertById==='function') upsertById(SURVEYS, obj);
           else if(!SURVEYS.some(function(x){return x.id===obj.id;})) SURVEYS.push(obj);
         });
@@ -7718,6 +7803,7 @@ mikke.ruu2025@gmail.com`;
       __surveySubmitting = true;
       setSurveySubmitButton(submitBtn, true);
       try{
+        eventId = resolveSurveyEventId(eventId, 'visitor');
         var collected = collectSurveyAnswers('visitor');
         if(collected.missing){
           showToast(collected.missing+'を入力してください','warn');
@@ -7761,6 +7847,11 @@ mikke.ruu2025@gmail.com`;
       __surveySubmitting = true;
       setSurveySubmitButton(submitBtn, true);
       try{
+        eventId = resolveSurveyEventId(eventId, 'exhibitor');
+        if(!eventId){
+          showToast('対象イベントを確認できません。イベント一覧または管理画面のアンケートURLから開いてください。','warn');
+          return;
+        }
         var collected = collectSurveyAnswers('exhibitor');
         if(collected.missing){
           showToast(collected.missing+'を入力してください','warn');
@@ -11426,6 +11517,11 @@ mikke.ruu2025@gmail.com`,
         showToast('送信できませんでした：'+((e&&e.message)||e),'warn');
       }
     }
+    function sendDashboardEventThanks(){
+      var dash = typeof getCurrentDashboardEvent==='function' ? getCurrentDashboardEvent() : null;
+      if(!dash || !dash.key){ showToast('対象バザールを選んでください','warn'); return; }
+      sendEventThanks(dash.key);
+    }
     // ── 出店者・参加者の印刷用リスト（現地集金チェック用） ──
     function printExhibitorList(evId){
       var ev = (EVENTS||[]).find(function(e){return e.id===evId;});
@@ -13611,6 +13707,9 @@ mikke.ruu2025@gmail.com`,
         .then(function(){
           syncPublicEventViews(true);
           renderHomeNotices();
+          if(typeof loadPublicEventCoversFromSupabase==='function'){
+            setTimeout(function(){ loadPublicEventCoversFromSupabase(); }, 0);
+          }
           return Promise.all([
             loadPublicNoticesFromSupabase(),
             loadOrgSettingsFromSupabase(),
