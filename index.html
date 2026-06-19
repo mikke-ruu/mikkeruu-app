@@ -7383,11 +7383,12 @@
     function getEventSurveys(eventId, type){
       var ev = (EVENTS||[]).find(function(e){return e.id===eventId});
       var evDate = getSurveyDateForEvent(ev);
+      var visitorTargetDate = normalizeDateInput(window.__surveyVisitorDate || todayStr());
       return SURVEYS.filter(function(s){
         if(type && s.type!==type) return false;
         if(s.type==='visitor'){
-          var visitDate = normalizeDateInput(s.visitDate || s.eventDate || s.date || '');
-          return s.eventId===eventId || (!!evDate && visitDate===evDate);
+          var sDate = normalizeDateInput((s.created_at||s.date||'').substring(0,10));
+          return sDate === visitorTargetDate;
         }
         return s.eventId===eventId;
       });
@@ -7456,13 +7457,6 @@
     }
     function resolveSurveyEventId(eventId, type){
       if(eventId) return eventId;
-      if(type === 'visitor'){
-        var visitDate = normalizeDateInput((document.getElementById('sv-visit-date')||{}).value || '');
-        if(visitDate){
-          var byDate = (EVENTS||[]).find(function(e){ return normalizeDateInput(e.date||'') === visitDate; });
-          if(byDate) return byDate.id || byDate.supabaseId || '';
-        }
-      }
       var active = getUpcomingEvent() || getFirstPublicEvent();
       return active ? (active.id || active.supabaseId || '') : '';
     }
@@ -7511,6 +7505,7 @@
           var obj = (row.answers && typeof row.answers==='object') ? Object.assign({}, row.answers) : {};
           obj.id = row.id;
           obj.source = 'supabase';
+          if(row.created_at) obj.created_at = row.created_at;
           if(!obj.type && (row.type || row.kind)) obj.type = row.type || row.kind;
           if(typeof upsertById==='function') upsertById(SURVEYS, obj);
           else if(!SURVEYS.some(function(x){return x.id===obj.id;})) SURVEYS.push(obj);
@@ -7718,10 +7713,7 @@ mikke.ruu2025@gmail.com`;
     function renderSurveyFormBody(type, eventId){
       var tpl = SURVEY_TEMPLATES[type] || {intro:'', questions:[]};
       var ev = (EVENTS||[]).find(function(e){return e.id===eventId});
-      var defaultVisitDate = getSurveyDateForEvent(ev) || todayStr();
-      var visitDateHtml = type==='visitor'
-        ? '<label style="font-size:11px;font-weight:900;color:var(--sub);display:block">来場日<input class="input" id="sv-visit-date" type="date" value="'+defaultVisitDate+'" style="margin-top:6px"></label>'
-        : '';
+      var visitDateHtml = '';
       var outroHtml = tpl.outro
         ? '<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0 0;font-size:12px;line-height:1.7;white-space:pre-line;color:var(--ink)">'+escapeHtml(tpl.outro||'')+'</div>'
         : '';
@@ -7812,7 +7804,7 @@ mikke.ruu2025@gmail.com`;
         var rating = parseInt(collected.answers.rating)||0;
         var s = {
           id:'s-'+Date.now().toString(36), eventId:eventId, type:'visitor',
-          date:todayStr(), visitDate:(document.getElementById('sv-visit-date')||{value:todayStr()}).value,
+          date:todayStr(),
           rating:rating, answers:collected.answers,
           goodPoint:collected.answers.goodPoint || '',
           improvePoint:collected.answers.improvePoint || '',
@@ -7955,6 +7947,11 @@ mikke.ruu2025@gmail.com`;
       renderAdminSurveys();
     }
 
+    function setSurveyVisitorDate(date){
+      if(!date) date = todayStr();
+      window.__surveyVisitorDate = normalizeDateInput(date) || normalizeDateInput(todayStr());
+      renderAdminSurveys();
+    }
     // 管理側アンケートパネル描画
     function renderAdminSurveys(){
       var sel = document.getElementById('survey-event-sel');
@@ -7989,7 +7986,11 @@ mikke.ruu2025@gmail.com`;
 
       var host = document.getElementById('admin-survey-host');
       if(!host) return;
-      var selectedDateLabel = ev.date ? formatEvDateShort(ev) : '日付未設定';
+      if(!window.__surveyVisitorDate) window.__surveyVisitorDate = normalizeDateInput(todayStr());
+      var selectedDateLabel = window.__surveyVisitorDate;
+      var _pvParts = selectedDateLabel.split('-');
+      var _prevDate = new Date(+_pvParts[0], +_pvParts[1]-1, +_pvParts[2]-1);
+      var prevDayStr = _prevDate.getFullYear()+'-'+String(_prevDate.getMonth()+1).padStart(2,'0')+'-'+String(_prevDate.getDate()).padStart(2,'0');
       // 来場者・出店者の2タイプそれぞれ
       host.innerHTML = ['visitor','exhibitor'].map(function(type){
         var label = type==='visitor' ? '来場者' : '出店者';
@@ -8007,9 +8008,16 @@ mikke.ruu2025@gmail.com`;
               '<img src="'+qrUrl+'" alt="QRコード" style="width:120px;height:120px;display:block;border-radius:8px">'+
               '<div style="font-size:11px;color:var(--sub);line-height:1.55">'+
                 '<b style="color:var(--ink);font-size:12px;display:block;margin-bottom:4px">共通QR（印刷は1回でOK）</b>'+
-                '全バザール共通フォームです。回答時の「来場日」で集計します。現在は '+selectedDateLabel+' の回答を表示中です。'+
-                '<button onclick="copyText(\''+surveyUrl+'\')" style="margin-top:8px;padding:6px 11px;border-radius:99px;background:#fff;border:1px solid '+border+';color:'+color+';font-size:11px;font-weight:900;cursor:pointer;font-family:inherit">URLをコピー</button>'+
-                '<button onclick="downloadQR(\''+qrUrl+'\',\'来場者アンケート_共通QR\')" style="margin-top:8px;margin-left:6px;padding:6px 11px;border-radius:99px;background:#fff;border:1px solid '+border+';color:'+color+';font-size:11px;font-weight:900;cursor:pointer;font-family:inherit">QR画像をDL</button>'+
+                '全バザール共通フォームです。集計日付を選択してください。'+
+                '<div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap">'+
+                  '<button onclick="setSurveyVisitorDate(\''+prevDayStr+'\')" style="padding:5px 10px;border-radius:99px;background:#fff;border:1px solid '+border+';color:'+color+';font-size:11px;font-weight:900;cursor:pointer;font-family:inherit">◁ 前日</button>'+
+                  '<input type="date" value="'+selectedDateLabel+'" onchange="setSurveyVisitorDate(this.value)" style="padding:4px 8px;border:1px solid var(--line);border-radius:8px;font-size:11px;font-family:inherit;cursor:pointer">'+
+                  '<button onclick="setSurveyVisitorDate(\'\')" style="padding:5px 10px;border-radius:99px;background:#fff;border:1px solid '+border+';color:'+color+';font-size:11px;font-weight:900;cursor:pointer;font-family:inherit">今日 ▷</button>'+
+                '</div>'+
+                '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">'+
+                  '<button onclick="copyText(\''+surveyUrl+'\')" style="padding:6px 11px;border-radius:99px;background:#fff;border:1px solid '+border+';color:'+color+';font-size:11px;font-weight:900;cursor:pointer;font-family:inherit">URLをコピー</button>'+
+                  '<button onclick="downloadQR(\''+qrUrl+'\',\'来場者アンケート_共通QR\')" style="padding:6px 11px;border-radius:99px;background:#fff;border:1px solid '+border+';color:'+color+';font-size:11px;font-weight:900;cursor:pointer;font-family:inherit">QR画像をDL</button>'+
+                '</div>'+
               '</div>'+
             '</div>'
           : '<div style="background:#fff;border-radius:12px;padding:12px;margin-bottom:10px;font-size:11px;color:var(--sub);line-height:1.6">'+
