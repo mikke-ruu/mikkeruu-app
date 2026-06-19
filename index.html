@@ -2603,13 +2603,16 @@
         if(!src || typeof src !== 'string' || src.indexOf('data:') !== 0) return src || '';
         try{
           var blob = await compressDataUrlToBlob(src, 1200, 0.82);
-          if(!blob) return src;
+          if(!blob) return '';
           var slug = String(ev.id || ev.slug || Date.now()).replace(/[^a-zA-Z0-9_-]/g, '-');
           var path = 'event-media/' + slug + '/' + label + '-' + Date.now() + '.jpg';
-          return await uploadFileToStorage(path, blob) || src;
+          var uploaded = await uploadFileToStorage(path, blob);
+          if(!uploaded){ showToast('画像のアップロードに失敗しました。再度お試しください', 'warn'); return ''; }
+          return uploaded;
         }catch(e){
           console.warn('event media upload failed:', e && (e.message||e));
-          return src;
+          showToast('画像のアップロードに失敗しました', 'warn');
+          return '';
         }
       }
       ev.coverImage = await eventMediaUrl(ev.coverImage || '', 'cover');
@@ -8612,16 +8615,18 @@ mikke.ruu2025@gmail.com`,
       var file    = window.__lastEyecatchFile;
       if(!dataUrl){showToast('画像を選択してください','warn');return}
 
-      // ─ Storage へアップロード（ログイン中なら）─
-      var imageUrl = dataUrl; // フォールバック: data-URL のまま
+      // ─ Storage へアップロード（必須: 失敗時は保存しない）─
       var sb = getMypageClient();
-      if(sb && file && CURRENT_USER_EMAIL){
-        var safeEmail = CURRENT_USER_EMAIL.replace(/[^a-zA-Z0-9]/g,'_');
-        var ext = (file.type||'image/jpeg').split('/')[1] || 'jpg';
-        var path = 'eyecatch/'+safeEmail+'/'+Date.now()+'.'+ext;
-        showToast('アイキャッチをアップロード中…','');
-        var storageUrl = await uploadFileToStorage(path, file);
-        if(storageUrl) imageUrl = storageUrl;
+      if(!sb || !CURRENT_USER_EMAIL){
+        showToast('ログイン中のみ提出できます。マイページからログインしてください', 'warn'); return;
+      }
+      showToast('アイキャッチをアップロード中…','');
+      var safeEmail = CURRENT_USER_EMAIL.replace(/[^a-zA-Z0-9]/g,'_');
+      var ext = (file.type||'image/jpeg').split('/')[1] || 'jpg';
+      var path = 'eyecatch/'+safeEmail+'/'+Date.now()+'.'+ext;
+      var imageUrl = await uploadFileToStorage(path, file);
+      if(!imageUrl){
+        showToast('画像のアップロードに失敗しました。時間をおいて再試行してください', 'warn'); return;
       }
 
       // マイページの新アイキャッチ枠に反映（提出済化／アバターも内部で更新）
@@ -13219,15 +13224,11 @@ mikke.ruu2025@gmail.com`,
           var path = 'albums/'+albumId+'/'+photoId+'.'+ext;
           return uploadFileToStorage(path, file).then(function(url){
             if(url) return {id:photoId, src:url, type:'image'};
-            return resizeImageToDataURL(file, 1200, 0.8).then(function(dataUrl){
-              return {id:photoId, src:dataUrl||'', type:'image'};
-            });
+            rejected++; return null;
           });
         }
-        // 画像 + Supabase未設定: 圧縮data-URL
-        return resizeImageToDataURL(file, 1200, 0.8).then(function(dataUrl){
-          return {id:photoId, src:dataUrl||'', type:'image'};
-        });
+        // Supabase未設定: アップロード不可のためスキップ
+        rejected++; return Promise.resolve(null);
       })).then(function(photos){
         if(rejected>0) showToast('動画'+rejected+'件は'+MAX_VIDEO_UPLOAD_MB+'MB超のため見送りました。大きい動画は「動画URLを追加」をご利用ください','warn');
         doneCb(photos.filter(function(p){return p && !!p.src;}));
