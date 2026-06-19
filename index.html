@@ -1279,7 +1279,7 @@
           <input class="input" id="party-email" type="email" placeholder="メールアドレス">
           <input class="input" id="party-count" type="number" value="1" min="1" placeholder="人数">
           <textarea class="input" id="party-comment" placeholder="コメント（任意）"></textarea>
-          <button class="primary" type="button" onclick="submitPartyApplication()">参加を申し込む</button>
+          <button class="primary" type="button" id="party-submit-btn" onclick="submitPartyApplication()">参加を申し込む</button>
         </form>
       </section>
 
@@ -1662,7 +1662,7 @@
               <button type="button" class="filter-chip" onclick="bulkSelectAllVisible(false)">解除</button>
               <button type="button" class="filter-chip" style="background:var(--ruu);color:#fff;border-color:var(--ruu)" onclick="bulkConfirmSelected()">選択を確定にする</button>
               <button type="button" class="filter-chip" style="background:#3ba48a;color:#fff;border-color:#3ba48a" onclick="bulkLineSelected()">選択をLINE済みに</button>
-              <button type="button" class="filter-chip" style="background:#b5651d;color:#fff;border-color:#b5651d" onclick="bulkSendThanksSelected()">💌 選択した人にお礼メール</button>
+              <button type="button" class="filter-chip" id="bulk-thanks-btn" style="background:#b5651d;color:#fff;border-color:#b5651d" onclick="bulkSendThanksSelected()">💌 選択した人にお礼メール</button>
             </div>
           </div>
           <select class="input" id="apps-drop-filter" onchange="filterAppsByDrop()">
@@ -3281,7 +3281,7 @@
         +'<input class="input" id="mr-email" type="email" placeholder="例：hanako@example.com（入れるとログイン・確定メール可）" style="margin-top:4px"></label>'
         +'<label style="font-size:11px;font-weight:900;color:var(--sub)">メモ（任意）'
         +'<input class="input" id="mr-memo" placeholder="例：LINE招待済み、備考など" style="margin-top:4px"></label>'
-        +'<button class="primary" type="button" onclick="submitManualExhibitor(\''+kind+'\')" style="margin-top:4px">'+btnLabel+'</button>'
+        +'<button class="primary" type="button" onclick="submitManualExhibitor(\''+kind+'\',this)" style="margin-top:4px">'+btnLabel+'</button>'
         +'</div>';
       openSheet(sheetTitle, '', body);
       if(!isEvent) updateManualFeeOptions();
@@ -3296,91 +3296,116 @@
         ? feeOpts.map(function(f){ return '<option value="'+h(f.id||f.label)+'">'+h(f.label)+'（¥'+(f.yen||0).toLocaleString()+'）</option>'; }).join('')
         : '<option value="">（区分なし）</option>';
     }
-    async function submitManualExhibitor(kind){
+    var __manualExhibitorSubmitting = false;
+    function setMikkeActionButtonLoading(btn, loading, loadingText){
+      if(!btn) return;
+      if(loading){
+        if(!btn.dataset.originalText) btn.dataset.originalText = btn.textContent || '';
+        btn.disabled = true;
+        btn.textContent = loadingText || '処理中...';
+        btn.style.opacity = '0.7';
+        btn.style.cursor = 'not-allowed';
+      }else{
+        btn.disabled = false;
+        btn.textContent = btn.dataset.originalText || btn.textContent || '';
+        btn.style.opacity = '';
+        btn.style.cursor = '';
+        delete btn.dataset.originalText;
+      }
+    }
+    async function submitManualExhibitor(kind, submitBtn){
+      if(__manualExhibitorSubmitting) return;
+      __manualExhibitorSubmitting = true;
+      setMikkeActionButtonLoading(submitBtn, true, '登録中...');
       var isEvent = kind === 'event';
-      var evSel = document.getElementById('mr-event');
-      var localEventId = evSel ? evSel.value : '';
-      var targetEv = (EVENTS||[]).find(function(e){return e.id===localEventId;});
-      if(!targetEv){showToast('対象を選んでください','warn');return;}
-      var supabaseEventId = targetEv.supabaseId||'';
-      var shop = isEvent ? '' : ((document.getElementById('mr-shop')||{}).value||'').trim();
-      var name = ((document.getElementById('mr-name')||{}).value||'').trim();
-      var category = isEvent ? 'event' : ((document.getElementById('mr-category')||{}).value||'retail');
-      var fee = isEvent ? '' : ((document.getElementById('mr-fee')||{}).value||'').trim();
-      var contentVal = isEvent ? '' : ((document.getElementById('mr-content')||{}).value||'').trim();
-      var uwidVal = isEvent ? '' : ((document.getElementById('mr-uwid')||{}).value||'').trim();
-      var achieverVal = isEvent ? '' : ((document.getElementById('mr-achiever')||{}).value||'').trim();
-      var email = ((document.getElementById('mr-email')||{}).value||'').trim();
-      var memo = ((document.getElementById('mr-memo')||{}).value||'').trim();
-      if(isEvent && !name){showToast('参加者名を入力してください','warn');return;}
-      if(!isEvent && !shop){showToast('屋号を入力してください','warn');return;}
-      var placeholderEmail = email || ('manual_'+Date.now()+'@mikkeruu.local');
-      var id = 'manual-'+Date.now();
-      var content = contentVal || '';
-      var appData = {
-        id:id, supabaseId:'', person:'', user_id:'',
-        event:localEventId,
-        status:'confirmed',
-        line:'0', eyecatch:'0', eyecatchImage:'',
-        category: isEvent ? 'event' : category,
-        party:'tbd', first:'first',
-        personname: name || shop,
-        shopname: isEvent ? (name||'') : (shop || name || ''),
-        feeplan: isEvent ? 'event-fee' : fee,
-        email: placeholderEmail,
-        kana:'', member:'', uwid:uwidVal||'', achiever:achieverVal||'', social:'',
-        content: content,
-        attendeeCount: 1,
-        comment:'', adminRequest: memo||'',
-        createdAt: (typeof datePartFromIso==='function' ? datePartFromIso(new Date().toISOString()) : ''),
-        isManual:true,
-        source:'manual'
-      };
-      if(typeof APPLICATIONS!=='undefined') APPLICATIONS.push(appData);
-      if(typeof renderApplications==='function') renderApplications();
-      if(typeof markStateDirty==='function') markStateDirty();
-      if(typeof saveAppState==='function') saveAppState();
-      var sb = typeof getSupabaseClient==='function' ? getSupabaseClient() : null;
-      if(sb && supabaseEventId){
-        var feeOptObj = (targetEv.feeOptions||[]).find(function(o){return o.id===fee;});
-        // プランに無い自由入力（例: "3500" や "3,500円"）は数字を抜き出して金額として保存
-        var manualYen = feeOptObj ? (parseInt(feeOptObj.yen,10)||0) : (parseInt(String(fee).replace(/[^0-9]/g,''),10)||0);
-        var res = await sb.from('applications').insert({
-          event_id: supabaseEventId,
+      try{
+        var evSel = document.getElementById('mr-event');
+        var localEventId = evSel ? evSel.value : '';
+        var targetEv = (EVENTS||[]).find(function(e){return e.id===localEventId;});
+        if(!targetEv){showToast('対象を選んでください','warn');return;}
+        var supabaseEventId = targetEv.supabaseId||'';
+        var shop = isEvent ? '' : ((document.getElementById('mr-shop')||{}).value||'').trim();
+        var name = ((document.getElementById('mr-name')||{}).value||'').trim();
+        var category = isEvent ? 'event' : ((document.getElementById('mr-category')||{}).value||'retail');
+        var fee = isEvent ? '' : ((document.getElementById('mr-fee')||{}).value||'').trim();
+        var contentVal = isEvent ? '' : ((document.getElementById('mr-content')||{}).value||'').trim();
+        var uwidVal = isEvent ? '' : ((document.getElementById('mr-uwid')||{}).value||'').trim();
+        var achieverVal = isEvent ? '' : ((document.getElementById('mr-achiever')||{}).value||'').trim();
+        var email = ((document.getElementById('mr-email')||{}).value||'').trim();
+        var memo = ((document.getElementById('mr-memo')||{}).value||'').trim();
+        if(isEvent && !name){showToast('参加者名を入力してください','warn');return;}
+        if(!isEvent && !shop){showToast('屋号を入力してください','warn');return;}
+        var placeholderEmail = email || ('manual_'+Date.now()+'@mikkeruu.local');
+        var id = 'manual-'+Date.now();
+        var content = contentVal || '';
+        var appData = {
+          id:id, supabaseId:'', person:'', user_id:'',
+          event:localEventId,
+          status:'confirmed',
+          line:'0', eyecatch:'0', eyecatchImage:'',
+          category: isEvent ? 'event' : category,
+          party:'tbd', first:'first',
+          personname: name || shop,
+          shopname: isEvent ? (name||'') : (shop || name || ''),
+          feeplan: isEvent ? 'event-fee' : fee,
           email: placeholderEmail,
-          person_name: name||shop,
-          shop_name: shop,
-          category: category,
-          content: content||null,
-          uword_id: uwidVal||null,
-          admin_memo: memo||null,
-          status: 'confirmed',
-          answers: {
-            first: 'first',
-            member: '',
-            uwid: uwidVal||'',
-            achiever: achieverVal||'',
-            feePlanId: isEvent ? 'event-fee' : (fee||''),
-            feePlanLabel: feeOptObj ? (feeOptObj.label||'') : (fee||''),
-            feeYen: isEvent ? 0 : manualYen,
-            party: 'tbd',
-            content: content||'',
-            adminRequest: memo||''
+          kana:'', member:'', uwid:uwidVal||'', achiever:achieverVal||'', social:'',
+          content: content,
+          attendeeCount: 1,
+          comment:'', adminRequest: memo||'',
+          createdAt: (typeof datePartFromIso==='function' ? datePartFromIso(new Date().toISOString()) : ''),
+          isManual:true,
+          source:'manual'
+        };
+        if(typeof APPLICATIONS!=='undefined') APPLICATIONS.push(appData);
+        if(typeof renderApplications==='function') renderApplications();
+        if(typeof markStateDirty==='function') markStateDirty();
+        if(typeof saveAppState==='function') saveAppState();
+        var sb = typeof getSupabaseClient==='function' ? getSupabaseClient() : null;
+        if(sb && supabaseEventId){
+          var feeOptObj = (targetEv.feeOptions||[]).find(function(o){return o.id===fee;});
+          // プランに無い自由入力（例: "3500" や "3,500円"）は数字を抜き出して金額として保存
+          var manualYen = feeOptObj ? (parseInt(feeOptObj.yen,10)||0) : (parseInt(String(fee).replace(/[^0-9]/g,''),10)||0);
+          var res = await sb.from('applications').insert({
+            event_id: supabaseEventId,
+            email: placeholderEmail,
+            person_name: name||shop,
+            shop_name: shop,
+            category: category,
+            content: content||null,
+            uword_id: uwidVal||null,
+            admin_memo: memo||null,
+            status: 'confirmed',
+            answers: {
+              first: 'first',
+              member: '',
+              uwid: uwidVal||'',
+              achiever: achieverVal||'',
+              feePlanId: isEvent ? 'event-fee' : (fee||''),
+              feePlanLabel: feeOptObj ? (feeOptObj.label||'') : (fee||''),
+              feeYen: isEvent ? 0 : manualYen,
+              party: 'tbd',
+              content: content||'',
+              adminRequest: memo||''
+            }
+          });
+          if(res.error){
+            showToast('Supabase保存エラー：'+res.error.message,'warn');
+          } else {
+            var label = isEvent ? name : shop;
+            showToast(label+' を'+(isEvent?'参加':'出店')+'確定で登録しました','success');
+            if(typeof loadAdminApplicationsFromSupabase==='function') loadAdminApplicationsFromSupabase({silent:true});
           }
-        });
-        if(res.error){
-          showToast('Supabase保存エラー：'+res.error.message,'warn');
         } else {
           var label = isEvent ? name : shop;
-          showToast(label+' を'+(isEvent?'参加':'出店')+'確定で登録しました','success');
-          if(typeof loadAdminApplicationsFromSupabase==='function') loadAdminApplicationsFromSupabase({silent:true});
+          showToast(label+' をローカルに登録しました','success');
         }
-      } else {
-        var label = isEvent ? name : shop;
-        showToast(label+' をローカルに登録しました','success');
+        var shEl = document.getElementById('sheet');
+        if(shEl) shEl.classList.remove('open');
+      } finally {
+        __manualExhibitorSubmitting = false;
+        setMikkeActionButtonLoading(submitBtn, false);
       }
-      var shEl = document.getElementById('sheet');
-      if(shEl) shEl.classList.remove('open');
     }
     function renderAdminLoginState(){
       var needsLogin = !!getSupabaseClient() && CURRENT_USER_ROLE !== 'admin';
@@ -5881,7 +5906,10 @@
       });
       showToast('LINE済みに更新しました（'+done+'件）','success');
     }
+    var __bulkThanksSubmitting = false;
     async function bulkSendThanksSelected(){
+      if(__bulkThanksSubmitting) return;
+      var btn = document.getElementById('bulk-thanks-btn');
       var cards = getBulkSelectedCards();
       if(!cards.length){ showToast('カードを選択してください（カード右上のチェック）','warn'); return; }
       var sb = getSupabaseClient();
@@ -5901,6 +5929,8 @@
       var nextUrl = '';
       if(nextLabel){ nextUrl = prompt('次回イベントの募集URL（任意・空欄可）','') || ''; }
       var appIds = cards.map(function(c){ return c.dataset.supabaseid||''; }).filter(Boolean);
+      __bulkThanksSubmitting = true;
+      setMikkeActionButtonLoading(btn, true, '送信中...');
       showToast('お礼メールを送信中…');
       try{
         var res = await sb.functions.invoke('event-thanks', { body: { event_id: ev.supabaseId, survey_url: surveyUrl, next_url: nextUrl, next_label: nextLabel, application_ids: appIds } });
@@ -5911,6 +5941,9 @@
         if(typeof loadAdminMailLogsFromSupabase==='function') loadAdminMailLogsFromSupabase();
       }catch(e){
         showToast('送信できませんでした：'+((e&&e.message)||e),'warn');
+      } finally {
+        __bulkThanksSubmitting = false;
+        setMikkeActionButtonLoading(btn, false);
       }
     }
     // ステータスチップ並びの「LINE済み」クイックトグル（当日準備のチェックボックスと同期）
@@ -6367,75 +6400,85 @@
         .filter(function(x){return x.eventId===evId;})
         .reduce(function(sum,x){return sum + (parseInt(x.count,10)||0)},0);
     }
+    var __partyApplicationSubmitting = false;
     async function submitPartyApplication(){
-      var ev = getPartyLinkedEvent();
-      if(!ev || !ev.party || !ev.party.enabled){
-        showToast('対象の交流会が見つかりません','warn');
-        return;
-      }
-      var nameEl = document.getElementById('party-name');
-      var emailEl = document.getElementById('party-email');
-      var countEl = document.getElementById('party-count');
-      var commentEl = document.getElementById('party-comment');
-      var name = (nameEl && nameEl.value || '').trim();
-      var email = (emailEl && emailEl.value || '').trim();
-      var count = Math.max(1, parseInt(countEl && countEl.value,10) || 1);
-      var comment = (commentEl && commentEl.value || '').trim();
-      if(!name){showToast('お名前を入力してください','warn');return;}
-      if(!email){showToast('メールアドレスを入力してください','warn');return;}
-
-      // Supabaseに保存（applicationsテーブル・answers.partyGeneral=true で一般交流会申込と判別）
-      var sb = typeof getSupabaseClient==='function' ? getSupabaseClient() : null;
-      if(sb && ev.supabaseId){
-        try{
-          var insRes = await sb.from('applications').insert({
-            event_id: ev.supabaseId,
-            email: email,
-            person_name: name,
-            shop_name: '',
-            category: 'party',
-            content: comment || null,
-            attendee_count: count,
-            status: 'new',
-            answers: { partyGeneral: true, party: 'yes', count: count, comment: comment }
-          });
-          if(insRes.error) throw insRes.error;
-        }catch(e){
-          showToast('申込の保存に失敗しました：'+((e&&e.message)||'通信エラー'),'warn');
+      if(__partyApplicationSubmitting) return;
+      var submitBtn = document.getElementById('party-submit-btn');
+      __partyApplicationSubmitting = true;
+      setMikkeActionButtonLoading(submitBtn, true, '申込中...');
+      try{
+        var ev = getPartyLinkedEvent();
+        if(!ev || !ev.party || !ev.party.enabled){
+          showToast('対象の交流会が見つかりません','warn');
           return;
         }
+        var nameEl = document.getElementById('party-name');
+        var emailEl = document.getElementById('party-email');
+        var countEl = document.getElementById('party-count');
+        var commentEl = document.getElementById('party-comment');
+        var name = (nameEl && nameEl.value || '').trim();
+        var email = (emailEl && emailEl.value || '').trim();
+        var count = Math.max(1, parseInt(countEl && countEl.value,10) || 1);
+        var comment = (commentEl && commentEl.value || '').trim();
+        if(!name){showToast('お名前を入力してください','warn');return;}
+        if(!email){showToast('メールアドレスを入力してください','warn');return;}
+
+        // Supabaseに保存（applicationsテーブル・answers.partyGeneral=true で一般交流会申込と判別）
+        var sb = typeof getSupabaseClient==='function' ? getSupabaseClient() : null;
+        if(sb && ev.supabaseId){
+          try{
+            var insRes = await sb.from('applications').insert({
+              event_id: ev.supabaseId,
+              email: email,
+              person_name: name,
+              shop_name: '',
+              category: 'party',
+              content: comment || null,
+              attendee_count: count,
+              status: 'new',
+              answers: { partyGeneral: true, party: 'yes', count: count, comment: comment }
+            });
+            if(insRes.error) throw insRes.error;
+          }catch(e){
+            showToast('申込の保存に失敗しました：'+((e&&e.message)||'通信エラー'),'warn');
+            return;
+          }
+        }
+
+        PARTY_APPLICATIONS.unshift({
+          id: 'party-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,6),
+          eventId: ev.id,
+          eventName: ev.name,
+          name: name,
+          email: email,
+          count: count,
+          comment: comment,
+          createdAt: new Date().toISOString().slice(0,10)
+        });
+        // 一般参加者数は管理画面売上集計にも使うため同期
+        ev.party.generalCount = sumGeneralPartyCountByEvent(ev.id);
+
+        if(nameEl) nameEl.value = '';
+        if(emailEl) emailEl.value = '';
+        if(countEl) countEl.value = '1';
+        if(commentEl) commentEl.value = '';
+
+        renderPartyPage();
+        renderEventList();
+        markStateDirty();
+        saveAppState();
+        showToast('交流会参加を受け付けました','success');
+        openSheet('交流会のお申し込みを受け付けました', ev.name,
+          '<p class="helper" style="margin:0 0 8px">ご登録ありがとうございました。確認メールをお送りします。</p>'+
+          '<div class="sheet-actions">'+
+            '<button class="primary" onclick="closeSheet();showPage(\'detail\')">イベント詳細へ戻る</button>'+
+            '<button class="secondary" onclick="closeSheet();showPage(\'home\')">ホームへ</button>'+
+          '</div>'
+        );
+      } finally {
+        __partyApplicationSubmitting = false;
+        setMikkeActionButtonLoading(submitBtn, false);
       }
-
-      PARTY_APPLICATIONS.unshift({
-        id: 'party-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,6),
-        eventId: ev.id,
-        eventName: ev.name,
-        name: name,
-        email: email,
-        count: count,
-        comment: comment,
-        createdAt: new Date().toISOString().slice(0,10)
-      });
-      // 一般参加者数は管理画面売上集計にも使うため同期
-      ev.party.generalCount = sumGeneralPartyCountByEvent(ev.id);
-
-      if(nameEl) nameEl.value = '';
-      if(emailEl) emailEl.value = '';
-      if(countEl) countEl.value = '1';
-      if(commentEl) commentEl.value = '';
-
-      renderPartyPage();
-      renderEventList();
-      markStateDirty();
-      saveAppState();
-      showToast('交流会参加を受け付けました','success');
-      openSheet('交流会のお申し込みを受け付けました', ev.name,
-        '<p class="helper" style="margin:0 0 8px">ご登録ありがとうございました。確認メールをお送りします。</p>'+
-        '<div class="sheet-actions">'+
-          '<button class="primary" onclick="closeSheet();showPage(\'detail\')">イベント詳細へ戻る</button>'+
-          '<button class="secondary" onclick="closeSheet();showPage(\'home\')">ホームへ</button>'+
-        '</div>'
-      );
     }
     // ダッシュボードの「交流会参加者」タイル → 出店者＋一般申込者の両方が見える参加者一覧シートを開く
     function openDashboardPartyList(){
