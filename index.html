@@ -13201,21 +13201,24 @@ mikke.ruu2025@gmail.com`,
       if(srcIsVideo(src)) return '';
       return src;
     }
-    function filesToPhotosWithStorage(albumId, files, doneCb){
+    function filesToPhotosWithStorage(albumId, files, doneCb, progressCb){
       var fileArr = files ? Array.from(files) : [];
       if(!fileArr.length){ doneCb([]); return; }
       var sb = getSupabaseClient();
       var rejected = 0;
+      var _done = 0; var _total = fileArr.length;
+      function tick(){ _done++; if(progressCb) progressCb(_done, _total); }
       Promise.all(fileArr.map(function(file){
         var photoId = uid2();
         var isVideo = (file.type||'').indexOf('video') === 0;
         var ext = (file.type||'image/jpeg').split('/')[1] || (isVideo?'mp4':'jpg');
         if(isVideo){
           // 動画: サイズ上限チェック → Storage へアップ（巨大data-URL直書きはしない）
-          if(file.size > MAX_VIDEO_UPLOAD_MB*1024*1024){ rejected++; return Promise.resolve(null); }
-          if(!sb){ rejected++; return Promise.resolve(null); }
+          if(file.size > MAX_VIDEO_UPLOAD_MB*1024*1024){ rejected++; tick(); return Promise.resolve(null); }
+          if(!sb){ rejected++; tick(); return Promise.resolve(null); }
           var vpath = 'albums/'+albumId+'/'+photoId+'.'+ext;
           return uploadFileToStorage(vpath, file).then(function(url){
+            tick();
             if(url) return {id:photoId, src:url, type:'video'};
             rejected++; return null;
           });
@@ -13223,12 +13226,13 @@ mikke.ruu2025@gmail.com`,
         if(sb){
           var path = 'albums/'+albumId+'/'+photoId+'.'+ext;
           return uploadFileToStorage(path, file).then(function(url){
+            tick();
             if(url) return {id:photoId, src:url, type:'image'};
             rejected++; return null;
           });
         }
         // Supabase未設定: アップロード不可のためスキップ
-        rejected++; return Promise.resolve(null);
+        tick(); rejected++; return Promise.resolve(null);
       })).then(function(photos){
         if(rejected>0) showToast('動画'+rejected+'件は'+MAX_VIDEO_UPLOAD_MB+'MB超のため見送りました。大きい動画は「動画URLを追加」をご利用ください','warn');
         doneCb(photos.filter(function(p){return p && !!p.src;}));
@@ -13332,6 +13336,7 @@ mikke.ruu2025@gmail.com`,
       });
     }
     function postAlbum(){
+      if(window.__albumSaving){ showToast('保存中です。完了までお待ちください','warn'); return; }
       var title = (document.getElementById('admin-album-title').value||'').trim();
       var subtitle = (document.getElementById('admin-album-subtitle').value||'').trim();
       if(!title){showToast('タイトルを入力してください','warn');return}
@@ -13342,6 +13347,13 @@ mikke.ruu2025@gmail.com`,
       if(adminAlbumType==='event'){
         var sel = document.getElementById('admin-album-event');
         if(sel) album.eventKey = sel.value;
+      }
+      window.__albumSaving = true;
+      var saveBtn = document.querySelector('[onclick="postAlbum()"]');
+      if(saveBtn){ saveBtn.disabled = true; saveBtn.textContent = '保存中...'; }
+      function resetBtn(){
+        window.__albumSaving = false;
+        if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = 'アルバムを保存'; }
       }
       filesToPhotosWithStorage(localId, files, function(photos){
         album.photos = photos;
@@ -13359,7 +13371,7 @@ mikke.ruu2025@gmail.com`,
               var albErr = window.__lastAlbumSaveError || '不明なエラー';
               showToast('⚠ アルバムのクラウド保存に失敗：'+albErr+'（このままだとリロードで消えます）','warn');
             }
-            return;
+            resetBtn(); return;
           }
           album.supabaseId = supabaseId;
           var coverPhoto = photos.find(function(p){return p.id===album.cover;});
@@ -13370,8 +13382,11 @@ mikke.ruu2025@gmail.com`,
             } else {
               showToast('アルバムをクラウドに保存しました（他の端末にも反映）','success');
             }
+            resetBtn();
           });
         });
+      }, function(_done, _total){
+        if(saveBtn && _total > 0) saveBtn.textContent = 'アップロード中 '+_done+'/'+_total+'枚…';
       });
     }
 
