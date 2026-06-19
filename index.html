@@ -13458,6 +13458,14 @@ mikke.ruu2025@gmail.com`,
     function addPhotosToAlbum(albumId, input){
       var a = ALBUMS.find(function(x){return x.id===albumId});
       if(!a || !input || !input.files || !input.files.length) return;
+      if(window.__albumPhotoAdding){ showToast('アップロード中です。完了までお待ちください','warn'); return; }
+      window.__albumPhotoAdding = true;
+      var addDiv = document.querySelector('.album-add-photos[onclick]');
+      if(addDiv){ addDiv.style.opacity='0.4'; addDiv.style.pointerEvents='none'; }
+      function resetAddDiv(){
+        window.__albumPhotoAdding = false;
+        if(addDiv){ addDiv.style.opacity=''; addDiv.style.pointerEvents=''; }
+      }
       filesToPhotosWithStorage(albumId, input.files, function(photos){
         a.photos = (a.photos||[]).concat(photos);
         if(!a.cover && a.photos.length) a.cover = a.photos[0].id;
@@ -13466,7 +13474,12 @@ mikke.ruu2025@gmail.com`,
         renderAlbums(); renderHomeAlbums(); renderAdminAlbums();
         showToast(photos.length+'枚を追加しました','success');
         // Supabase 保存
-        if(a.supabaseId) saveAlbumPhotosToSupabase(a.supabaseId, photos);
+        if(a.supabaseId) saveAlbumPhotosToSupabase(a.supabaseId, photos).then(function(ok){
+          if(ok===false && photos.length) showToast('写真のクラウド保存に失敗：'+(window.__lastAlbumPhotoError||'不明'),'warn');
+        });
+        resetAddDiv();
+      }, function(_done, _total){
+        if(addDiv && _total > 0) addDiv.textContent = 'アップロード中 '+_done+'/'+_total+'枚…';
       });
     }
     function addVideoUrlToAlbum(albumId){
