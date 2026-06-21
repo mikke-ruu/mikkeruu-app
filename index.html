@@ -12170,8 +12170,22 @@ mikke.ruu2025@gmail.com`,
         syncPublicEventViews();
         return;
       }
-      // 日付順（新しい→古い）
-      list.sort(function(a,b){return compareEventDateAsc(b,a)});
+      // 「すべて」フィルタは二段階ソート: upcoming昇順→past降順→draft
+      if(eventListFilter==='all'){
+        list.sort(function(a,b){
+          var sa = getEventEffectiveStatus(a);
+          var sb = getEventEffectiveStatus(b);
+          var order = {upcoming:0, past:1, draft:2};
+          var oa = order[sa] !== undefined ? order[sa] : 2;
+          var ob = order[sb] !== undefined ? order[sb] : 2;
+          if(oa !== ob) return oa - ob;
+          if(sa === 'upcoming' && sb === 'upcoming') return compareEventDateAsc(a,b);
+          return compareEventDateAsc(b,a);
+        });
+      } else {
+        // 他のフィルタは日付降順（新しい→古い）
+        list.sort(function(a,b){return compareEventDateAsc(b,a)});
+      };
       host.innerHTML = list.map(buildEventListCard).join('');
       syncPublicEventViews();
     }
