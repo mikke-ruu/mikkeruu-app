@@ -2582,7 +2582,7 @@
         var urlRes = sb.storage.from('event-images').getPublicUrl(path);
         return (urlRes.data && urlRes.data.publicUrl) ? urlRes.data.publicUrl : null;
       }catch(e){
-        console.warn('Storage upload failed ['+path+']:', e.message||e);
+        console.error('Storage upload failed ['+path+']:', e.message||e, e);
         return null;
       }
     }
@@ -13260,7 +13260,7 @@ mikke.ruu2025@gmail.com`,
       var fileArr = files ? Array.from(files) : [];
       if(!fileArr.length){ doneCb([]); return; }
       var sb = getSupabaseClient();
-      var rejected = 0;
+      var rejectedVideoSize = 0, rejectedFail = 0, rejectedNoSb = 0;
       var _done = 0; var _total = fileArr.length;
       function tick(){ _done++; if(progressCb) progressCb(_done, _total); }
       Promise.all(fileArr.map(function(file){
@@ -13269,13 +13269,14 @@ mikke.ruu2025@gmail.com`,
         var ext = (file.type||'image/jpeg').split('/')[1] || (isVideo?'mp4':'jpg');
         if(isVideo){
           // 動画: サイズ上限チェック → Storage へアップ（巨大data-URL直書きはしない）
-          if(file.size > MAX_VIDEO_UPLOAD_MB*1024*1024){ rejected++; tick(); return Promise.resolve(null); }
-          if(!sb){ rejected++; tick(); return Promise.resolve(null); }
+          if(file.size > MAX_VIDEO_UPLOAD_MB*1024*1024){ rejectedVideoSize++; tick(); return Promise.resolve(null); }
+          if(!sb){ rejectedNoSb++; tick(); return Promise.resolve(null); }
           var vpath = 'albums/'+albumId+'/'+photoId+'.'+ext;
           return uploadFileToStorage(vpath, file).then(function(url){
             tick();
             if(url) return {id:photoId, src:url, type:'video'};
-            rejected++; return null;
+            console.error('[album] 動画アップロード失敗:', file.name, file.size+'bytes', file.type);
+            rejectedFail++; return null;
           });
         }
         if(sb){
@@ -13283,13 +13284,17 @@ mikke.ruu2025@gmail.com`,
           return uploadFileToStorage(path, file).then(function(url){
             tick();
             if(url) return {id:photoId, src:url, type:'image'};
-            rejected++; return null;
+            console.error('[album] 画像アップロード失敗:', file.name, file.size+'bytes', file.type);
+            rejectedFail++; return null;
           });
         }
-        // Supabase未設定: アップロード不可のためスキップ
-        tick(); rejected++; return Promise.resolve(null);
+        // Supabase未接続: アップロード不可のためスキップ
+        console.error('[album] Supabase未接続のためアップロード不可:', file.name);
+        tick(); rejectedNoSb++; return Promise.resolve(null);
       })).then(function(photos){
-        if(rejected>0) showToast('動画'+rejected+'件は'+MAX_VIDEO_UPLOAD_MB+'MB超のため見送りました。大きい動画は「動画URLを追加」をご利用ください','warn');
+        if(rejectedVideoSize > 0) showToast('動画'+rejectedVideoSize+'件は'+MAX_VIDEO_UPLOAD_MB+'MB超のため見送りました。大きい動画は「動画URLを追加」をご利用ください','warn');
+        if(rejectedFail > 0) showToast(rejectedFail+'件のアップロードに失敗しました。ブラウザの開発者ツール(F12)でエラーを確認するか、時間をおいて再試行してください','warn');
+        if(rejectedNoSb > 0) showToast(rejectedNoSb+'件は管理者ログイン中のみアップロードできます','warn');
         doneCb(photos.filter(function(p){return p && !!p.src;}));
       });
     }
