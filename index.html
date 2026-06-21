@@ -2484,7 +2484,7 @@
       if(!sb){ EVENTS_LOADING = false; return false; }
       try{
         var res = await sb.from('events')
-          .select(EVENT_LIGHT_SELECT)
+          .select(EVENT_FULL_SELECT)
           .in('status', CURRENT_USER_ROLE==='admin' ? ['public','closed','past','draft'] : ['public','closed','past'])
           .order('starts_at', {ascending:true});
         // 新カラム未追加の旧DB向けフォールバック
