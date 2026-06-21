@@ -11167,22 +11167,13 @@ mikke.ruu2025@gmail.com`,
     }
     // 出店者を {name, shop, personId} の配列で返す（人名表示用）
     function getEventExhibitors(ev){
-      var s = getEventEffectiveStatus(ev);
-      // 申込確定者から
-      var fromApps = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card'))
-        .filter(function(c){return c.dataset.event === ev.id && c.dataset.status === 'confirmed'})
-        .map(function(c){return {name:c.dataset.personname||'-', shop:c.dataset.shopname||'-', appId:c.id}});
-      if(s!=='past') return fromApps;
-      // 過去：pastExhibitors（名前付き）+ apps の確定者
-      var merged = (ev.pastExhibitors||[]).slice().map(function(p){return typeof p==='string'?{name:p, shop:'', appId:''}:Object.assign({appId:''},p)});
-      fromApps.forEach(function(p){
-        if(!merged.find(function(m){return m.name===p.name||m.shop===p.shop})) merged.push(p);
-      });
-      return merged;
+      // APPLICATIONS 配列（Supabase 最新）から確定者を取得（DOM 依存・pastExhibitors スナップショット廃止）
+      return (APPLICATIONS||[])
+        .filter(function(a){return a.event===ev.id && a.status==='confirmed'})
+        .map(function(a){return {name:a.personname||'-', shop:a.shopname||'-', appId:a.id}});
     }
     function getEventApplicantCount(ev){
-      return Array.from(document.querySelectorAll('#admin-applications .exhibitor-card'))
-        .filter(function(c){return c.dataset.event === ev.id}).length;
+      return (APPLICATIONS||[]).filter(function(a){return a.event===ev.id}).length;
     }
     function formatEventDate(ev){
       var parts = (ev.date||'').split('-');
@@ -11260,11 +11251,7 @@ mikke.ruu2025@gmail.com`,
       var statBtn = function(num, label, key, extraCls){
         return '<button type="button" class="ev-stat clickable '+(extraCls||'')+'" onclick="openEventAppsFromSummary(\''+ev.id+'\',\''+key+'\')"><div class="num">'+num+'</div><div class="label">'+label+'</div></button>';
       };
-      // 過去イベントは pastExhibitors も加味
-      if(getEventEffectiveStatus(ev)==='past'){
-        var pastCnt = (ev.pastExhibitors||[]).length;
-        conf = Math.max(conf, conf+pastCnt);
-      }
+
       if(isParticipantOnlyEvent(ev)){
         var attendeeTotal = apps.reduce(function(sum, c){
           return sum + (parseInt(c.dataset.attendeecount||'1',10) || 1);
@@ -11975,9 +11962,9 @@ mikke.ruu2025@gmail.com`,
       var badge = getEventStatusBadge(ev);
       var isEventOnly = isParticipantOnlyEvent(ev);
       var exhibitors = isEventOnly
-        ? Array.from(document.querySelectorAll('#admin-applications .exhibitor-card'))
-            .filter(function(c){return c.dataset.event===ev.id && c.dataset.status==='confirmed';})
-            .map(function(c){return {name:c.dataset.personname||'-', shop:'', appId:c.id};})
+        ? (APPLICATIONS||[])
+            .filter(function(a){return a.event===ev.id && a.status==='confirmed';})
+            .map(function(a){return {name:a.personname||'-', shop:'', appId:a.id};})
         : getEventExhibitors(ev);
       var applicantCount = getEventApplicantCount(ev);
       var partyBadge = isEventOnly
@@ -12675,6 +12662,17 @@ mikke.ruu2025@gmail.com`,
         if(storedDraft && storedDraft.id===id){
           applyEventEditDraftToForm(storedDraft);
           showToast('前回の入力を復元しました');
+          // staleドラフトがgalleryをクリアした場合、イベントデータで保護
+          if(!getEEGalleryPreviewSources().length && Array.isArray(ev.flyerImages) && ev.flyerImages.length){
+            renderEEGalleryPreviewFromSources(ev.flyerImages.slice(0,5));
+          }
+          // staleドラフトがparty.enabledをリセットした場合、イベントデータで保護
+          var peCheck = document.getElementById('ee-p-enabled');
+          if(peCheck && peCheck.value !== '1' && ev.party && ev.party.enabled){
+            peCheck.value = '1';
+            var kindElCheck = document.querySelector('#sheet-body .filter-chip[data-kind].active');
+            updateEEKindLayout(kindElCheck ? kindElCheck.dataset.kind : 'バザール');
+          }
         }
         bindEventEditDraftAutosave(id);
         renderEEWizardStep();
