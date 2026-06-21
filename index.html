@@ -12660,19 +12660,14 @@ mikke.ruu2025@gmail.com`,
         renderEEGalleryPreviewFromSources(Array.isArray(ev.flyerImages) ? ev.flyerImages.slice(0,5) : []);
         var storedDraft = getStoredEventEditDraft();
         if(storedDraft && storedDraft.id===id){
-          applyEventEditDraftToForm(storedDraft);
-          showToast('前回の入力を復元しました');
-          // staleドラフトがgalleryをクリアした場合、イベントデータで保護
-          if(!getEEGalleryPreviewSources().length && Array.isArray(ev.flyerImages) && ev.flyerImages.length){
-            renderEEGalleryPreviewFromSources(ev.flyerImages.slice(0,5));
-          }
-          // staleドラフトがparty.enabledをリセットした場合、イベントデータで保護
-          var peCheck = document.getElementById('ee-p-enabled');
-          if(peCheck && peCheck.value !== '1' && ev.party && ev.party.enabled){
-            peCheck.value = '1';
-            var kindElCheck = document.querySelector('#sheet-body .filter-chip[data-kind].active');
-            updateEEKindLayout(kindElCheck ? kindElCheck.dataset.kind : 'バザール');
-          }
+          var draftBanner = document.createElement('div');
+          draftBanner.id = 'ee-draft-banner';
+          draftBanner.style.cssText = 'background:#fff8e6;border:1.5px solid #f5a623;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:8px';
+          draftBanner.innerHTML =
+            '<span style="font-size:13px;color:var(--ink)">未保存の下書きがあります</span>'+
+            '<button type="button" onclick="applyStoredDraftToForm(\''+id+'\')" style="flex-shrink:0;border:none;background:#f5a623;color:#fff;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:700;cursor:pointer">下書きを復元する</button>';
+          var firstStep = document.querySelector('[data-ee-step="1"]') || document.getElementById('sheet-body');
+          if(firstStep) firstStep.insertBefore(draftBanner, firstStep.firstChild);
         }
         bindEventEditDraftAutosave(id);
         renderEEWizardStep();
@@ -12900,6 +12895,14 @@ mikke.ruu2025@gmail.com`,
       if(wrap) wrap.style.display = (draft.party && draft.party.enabled) ? 'grid' : 'none';
       updateEEKindLayout(draft.kind || 'バザール');
     }
+    function applyStoredDraftToForm(id){
+      var draft = getStoredEventEditDraft();
+      if(!draft || draft.id !== id) return;
+      applyEventEditDraftToForm(draft);
+      var banner = document.getElementById('ee-draft-banner');
+      if(banner) banner.remove();
+      showToast('下書きを復元しました');
+    }
     function formatConfirmLine(label, value, hideIfEmpty){
       var hasValue = !(value==null || String(value).trim()==='');
       if(hideIfEmpty && !hasValue) return '';
@@ -13106,6 +13109,7 @@ mikke.ruu2025@gmail.com`,
         __eventEditContext.active = false;
         __eventEditContext.eventId = '';
         clearStoredEventEditDraft();
+        try{ localStorage.setItem(EVENTS_CACHE_KEY, JSON.stringify(EVENTS)); }catch(e){}
         renderEventList();
         showToast('イベントを保存しました','success');
         closeSheet(true);
