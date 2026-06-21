@@ -12346,6 +12346,34 @@ mikke.ruu2025@gmail.com`,
         reader.readAsDataURL(file);
       });
     }
+    function resizeFileToBlob(file, maxPx, quality){
+      return new Promise(function(resolve){
+        var reader = new FileReader();
+        reader.onload = function(e){
+          var src = e && e.target ? e.target.result : null;
+          if(!src){ resolve(file); return; }
+          var img = new Image();
+          img.onload = function(){
+            var w = img.naturalWidth || img.width;
+            var h = img.naturalHeight || img.height;
+            var max = maxPx || 1600;
+            var scale = (w > max || h > max) ? Math.min(max/w, max/h) : 1;
+            var cw = Math.max(1, Math.round(w * scale));
+            var ch = Math.max(1, Math.round(h * scale));
+            try{
+              var canvas = document.createElement('canvas');
+              canvas.width = cw; canvas.height = ch;
+              canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
+              canvas.toBlob(function(blob){ resolve(blob || file); }, 'image/jpeg', quality || 0.82);
+            }catch(ex){ resolve(file); }
+          };
+          img.onerror = function(){ resolve(file); };
+          img.src = src;
+        };
+        reader.onerror = function(){ resolve(file); };
+        reader.readAsDataURL(file);
+      });
+    }
 
     function handleEECoverPreview(input){
       var wrap = document.getElementById('ee-cover-preview');
@@ -13284,12 +13312,14 @@ mikke.ruu2025@gmail.com`,
           });
         }
         if(sb){
-          var path = 'albums/'+albumId+'/'+photoId+'.'+ext;
-          return uploadFileToStorage(path, file).then(function(url){
-            tick();
-            if(url) return {id:photoId, src:url, type:'image'};
-            console.error('[album] 画像アップロード失敗:', file.name, file.size+'bytes', file.type);
-            rejectedFail++; return null;
+          var path = 'albums/'+albumId+'/'+photoId+'.jpg';
+          return resizeFileToBlob(file, 1600, 0.82).then(function(blob){
+            return uploadFileToStorage(path, blob).then(function(url){
+              tick();
+              if(url) return {id:photoId, src:url, type:'image'};
+              console.error('[album] 画像アップロード失敗:', file.name, file.size+'bytes', file.type);
+              rejectedFail++; return null;
+            });
           });
         }
         // Supabase未接続: アップロード不可のためスキップ
