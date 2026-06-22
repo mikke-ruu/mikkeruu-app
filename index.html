@@ -7286,9 +7286,8 @@
       if(!host) return;
       var queryEl = document.getElementById('events-search-input');
       var query = ((queryEl && queryEl.value) || '').trim().toLowerCase();
-      var list = (EVENTS||[])
-        .filter(canShowInPublicEvents)
-        .sort(compareEventDateAsc);
+      var list = (EVENTS||[]).filter(canShowInPublicEvents);
+      var isAllFilter = !eventsPageFilter || eventsPageFilter === 'all';
       if(eventsPageFilter==='recruiting'){
         list = list.filter(function(ev){return getEventPublicTag(ev)==='recruiting';});
       }else if(eventsPageFilter==='upcoming'){
@@ -7324,14 +7323,37 @@
           '</article>';
         }).join('');
       };
-      var bazaars = list.filter(function(ev){return !isParticipantOnlyEvent(ev);});
-      var participantEvents = list.filter(function(ev){return isParticipantOnlyEvent(ev);});
       var sections = [];
-      if(bazaars.length){
-        sections.push('<div class="section-head" style="margin:0 0 8px"><h2 class="section-title">バザール</h2></div>'+buildRows(bazaars));
-      }
-      if(participantEvents.length){
-        sections.push('<div class="section-head" style="margin:14px 0 8px"><h2 class="section-title">イベント</h2></div>'+buildRows(participantEvents));
+      if(isAllFilter){
+        // すべてフィルタ: バザール(開催予定)→イベント(開催予定)→過去イベント(全種・新しい順)
+        var upcomingBazaars = list.filter(function(ev){
+          return !isParticipantOnlyEvent(ev) && getEventEffectiveStatus(ev)!=='past';
+        }).sort(compareEventDateAsc);
+        var upcomingParticipant = list.filter(function(ev){
+          return isParticipantOnlyEvent(ev) && getEventEffectiveStatus(ev)!=='past';
+        }).sort(compareEventDateAsc);
+        var pastAll = list.filter(function(ev){
+          return getEventEffectiveStatus(ev)==='past';
+        }).sort(function(a,b){return compareEventDateAsc(b,a);});
+        if(upcomingBazaars.length){
+          sections.push('<div class="section-head" style="margin:0 0 8px"><h2 class="section-title">バザール</h2></div>'+buildRows(upcomingBazaars));
+        }
+        if(upcomingParticipant.length){
+          sections.push('<div class="section-head" style="margin:14px 0 8px"><h2 class="section-title">イベント</h2></div>'+buildRows(upcomingParticipant));
+        }
+        if(pastAll.length){
+          sections.push('<div class="section-head" style="margin:14px 0 8px"><h2 class="section-title">過去イベント</h2></div>'+buildRows(pastAll));
+        }
+      } else {
+        // 個別フィルタ: カテゴリ分割を維持・各カテゴリ内を日付昇順
+        var filteredBazaars = list.filter(function(ev){return !isParticipantOnlyEvent(ev);}).sort(compareEventDateAsc);
+        var filteredParticipant = list.filter(function(ev){return isParticipantOnlyEvent(ev);}).sort(compareEventDateAsc);
+        if(filteredBazaars.length){
+          sections.push('<div class="section-head" style="margin:0 0 8px"><h2 class="section-title">バザール</h2></div>'+buildRows(filteredBazaars));
+        }
+        if(filteredParticipant.length){
+          sections.push('<div class="section-head" style="margin:14px 0 8px"><h2 class="section-title">イベント</h2></div>'+buildRows(filteredParticipant));
+        }
       }
       host.innerHTML = sections.join('');
     }
