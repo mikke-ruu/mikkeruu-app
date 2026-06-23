@@ -3696,6 +3696,12 @@
       }
       syncFavoriteButtons();
       if(id === 'party'){renderPartyPage()}
+      if(id === 'faq'){
+        if(typeof renderUserFAQs==='function') renderUserFAQs();
+        if(!FAQS.some(function(f){return f.source==='supabase';})){
+          if(typeof loadFaqsFromSupabase==='function') loadFaqsFromSupabase();
+        }
+      }
       cameFromShortcut = !rootNav && id !== 'home';
       var contextBack = document.getElementById('context-back');
       if(contextBack){contextBack.classList.toggle('show', cameFromShortcut)}
@@ -13898,7 +13904,8 @@ mikke.ruu2025@gmail.com`,
             loadPublicNoticesFromSupabase(),
             loadOrgSettingsFromSupabase(),
             loadSurveyTemplatesFromSupabase(),
-            loadAlbumsFromSupabase()
+            loadAlbumsFromSupabase(),
+            loadFaqsFromSupabase()
           ]);
         })
         .then(function(){
