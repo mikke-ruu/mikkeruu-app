@@ -9626,6 +9626,8 @@ mikke.ruu2025@gmail.com`,
         var catMap = {'物販':'retail','飲食':'food','セッション':'session','施術':'treatment'};
         card.dataset.category = catMap[newCat] || card.dataset.category;
         card.dataset.party = newParty==='参加'?'yes':newParty==='不参加'?'no':'tbd';
+        card.dataset.shopname = newShop || card.dataset.shopname;
+        card.dataset.personname = newName || card.dataset.personname;
         if(typeof nextEyecatchSrc==='string'){
           card.dataset.eyecatchsrc = nextEyecatchSrc;
           card.dataset.eyecatch = nextEyecatchSrc ? '1' : '0';
