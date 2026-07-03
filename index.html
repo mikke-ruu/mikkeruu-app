@@ -3604,7 +3604,13 @@
       if(!sb){ showToast('ログインを利用できません','warn'); return; }
       try{
         var redirectTo = (location.origin||'')+location.pathname+'#mypage';
-        var res = await sb.auth.signInWithOtp({ email:email, options:{ emailRedirectTo:redirectTo, shouldCreateUser:false } });
+        // 申込実績のあるメールならアカウント自動作成を許可（ゴーストアカウント防止は維持）
+        var allowCreate = false;
+        try{
+          var chk = await sb.rpc('has_application_email', { p_email: email });
+          if(!chk.error && chk.data === true) allowCreate = true;
+        }catch(_e){ /* RPC未デプロイ時は従来動作（false）にフォールバック */ }
+        var res = await sb.auth.signInWithOtp({ email:email, options:{ emailRedirectTo:redirectTo, shouldCreateUser:allowCreate } });
         if(res.error) throw res.error;
         showToast('メールを送りました。リンクを押すか、認証コード（数字）を下に入力してください。','success');
         var otpRow = document.getElementById('mypage-otp-row');
@@ -3613,6 +3619,8 @@
         var msg = (e&&e.message)||String(e);
         if(/rate|seconds/i.test(msg)){
           showToast('短時間に送信しすぎています。1分ほど待ってからもう一度お試しください。','warn');
+        }else if(/signups not allowed/i.test(msg)){
+          showToast('このメールアドレスの申込が見つかりませんでした。申込時に使ったメールアドレスをご確認ください。','warn');
         }else{
           showToast('送信できませんでした：'+msg,'warn');
         }
