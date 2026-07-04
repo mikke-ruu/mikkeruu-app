@@ -2483,15 +2483,17 @@
       var sb = getSupabaseClient();
       if(!sb){ EVENTS_LOADING = false; return false; }
       try{
+        var _loadedAsAdmin = (CURRENT_USER_ROLE==='admin');
+        window.__eventsLoadedAsAdmin = _loadedAsAdmin;
         var res = await sb.from('events')
           .select(EVENT_FULL_SELECT)
-          .in('status', CURRENT_USER_ROLE==='admin' ? ['public','closed','past','draft'] : ['public','closed','past'])
+          .in('status', _loadedAsAdmin ? ['public','closed','past','draft'] : ['public','closed','past'])
           .order('starts_at', {ascending:true});
         // 新カラム未追加の旧DB向けフォールバック
         if(res.error && res.error.message && res.error.message.indexOf('does not exist')!==-1){
           res = await sb.from('events')
             .select('id,slug,kind,status,title,short_title,starts_at,ends_at,venue,address,map_url,line_group_url,capacity,application_deadline')
-            .in('status', CURRENT_USER_ROLE==='admin' ? ['public','closed','past','draft'] : ['public','closed','past'])
+            .in('status', _loadedAsAdmin ? ['public','closed','past','draft'] : ['public','closed','past'])
             .order('starts_at', {ascending:true});
         }
         if(res.error) throw res.error;
@@ -13912,6 +13914,14 @@ mikke.ruu2025@gmail.com`,
         authReady
       ])
         .then(function(){
+          // 管理者ログインが authReady で後から確定した場合、draft を含めて読み直す（1回のみ）
+          if(CURRENT_USER_ROLE==='admin' && !window.__eventsLoadedAsAdmin && !window.__eventsAdminReloaded){
+            window.__eventsAdminReloaded = true;
+            return loadPublicEventsFromSupabase().then(function(){
+              syncPublicEventViews(true);
+              renderHomeNotices();
+            });
+          }
           syncPublicEventViews(true);
           renderHomeNotices();
           if(typeof loadPublicEventCoversFromSupabase==='function'){
