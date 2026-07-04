@@ -13177,18 +13177,25 @@ mikke.ruu2025@gmail.com`,
         clearStoredEventEditDraft();
         try{ localStorage.setItem(EVENTS_CACHE_KEY, JSON.stringify(EVENTS)); }catch(e){}
         renderEventList();
-        showToast('イベントを保存しました','success');
-        closeSheet(true);
-        // Supabase に書き込み（非同期・失敗してもUIは閉じる）
+        // Supabase 保存の成否を待ってからUIを確定する（端末間同期の保証）
         if(getSupabaseClient()){
+          showToast('保存中…','success');
           saveEventToSupabase(ev).then(function(result){
             if(result===true){
-              showToast('クラウドにも保存しました（他の端末・公開ページに反映されます）','success');
+              showToast('保存しました（他の端末・公開ページにも反映されます）','success');
               if(typeof refreshAdminDashboardEventSelector==='function') refreshAdminDashboardEventSelector();
+              closeSheet(true);
             }else{
-              showToast('⚠ クラウド保存に失敗：'+result,'warn');
+              // クラウド保存失敗：シートは閉じない（データ喪失の誤解を防ぐ）
+              showToast('⚠ クラウド保存に失敗しました：'+result+'／もう一度ログインしてから保存してください','warn');
             }
+          }).catch(function(e){
+            showToast('⚠ クラウド保存でエラー：'+((e&&e.message)||e)+'／再ログイン後に保存してください','warn');
           });
+        }else{
+          // Supabase未接続時のみローカル保存で確定（従来動作）
+          showToast('この端末に保存しました（クラウド未接続）','warn');
+          closeSheet(true);
         }
       };
 
