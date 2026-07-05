@@ -2575,8 +2575,8 @@
        ───────────────────────────────────────────────────── */
     // ファイルを event-images バケットにアップロードしてパブリックURLを返す
     // 失敗時は null を返す
-    async function uploadFileToStorage(path, file){
-      var sb = getSupabaseClient();
+    async function uploadFileToStorage(path, file, clientOverride){
+      var sb = clientOverride || getSupabaseClient();
       if(!sb || !file) return null;
       try{
         var res = await sb.storage.from('event-images').upload(path, file, {upsert:true, contentType:file.type||'image/jpeg'});
@@ -8705,7 +8705,7 @@ mikke.ruu2025@gmail.com`,
       var safeEmail = CURRENT_USER_EMAIL.replace(/[^a-zA-Z0-9]/g,'_');
       var ext = (file.type||'image/jpeg').split('/')[1] || 'jpg';
       var path = 'eyecatch/'+safeEmail+'/'+Date.now()+'.'+ext;
-      var imageUrl = await uploadFileToStorage(path, file);
+      var imageUrl = await uploadFileToStorage(path, file, getMypageClient());
       if(!imageUrl){
         showToast('画像のアップロードに失敗しました。時間をおいて再試行してください', 'warn'); return;
       }
