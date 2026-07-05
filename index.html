@@ -13995,25 +13995,27 @@ mikke.ruu2025@gmail.com`,
       ])
         .then(function(){
           // 管理者ログインが authReady で後から確定した場合、draft を含めて読み直す（1回のみ）
-          if(CURRENT_USER_ROLE==='admin' && !window.__eventsLoadedAsAdmin && !window.__eventsAdminReloaded){
+          var needAdminReload = (CURRENT_USER_ROLE==='admin' && !window.__eventsLoadedAsAdmin && !window.__eventsAdminReloaded);
+          var pre = Promise.resolve();
+          if(needAdminReload){
             window.__eventsAdminReloaded = true;
-            return loadPublicEventsFromSupabase().then(function(){
-              syncPublicEventViews(true);
-              renderHomeNotices();
-            });
+            pre = loadPublicEventsFromSupabase();
           }
-          syncPublicEventViews(true);
-          renderHomeNotices();
-          if(typeof loadPublicEventCoversFromSupabase==='function'){
-            setTimeout(function(){ loadPublicEventCoversFromSupabase(); }, 0);
-          }
-          return Promise.all([
-            loadPublicNoticesFromSupabase(),
-            loadOrgSettingsFromSupabase(),
-            loadSurveyTemplatesFromSupabase(),
-            loadAlbumsFromSupabase(),
-            loadFaqsFromSupabase()
-          ]);
+          // イベント（必要なら再読込）を待ってから、共通の後続処理へ必ず合流する
+          return pre.then(function(){
+            syncPublicEventViews(true);
+            renderHomeNotices();
+            if(typeof loadPublicEventCoversFromSupabase==='function'){
+              setTimeout(function(){ loadPublicEventCoversFromSupabase(); }, 0);
+            }
+            return Promise.all([
+              loadPublicNoticesFromSupabase(),
+              loadOrgSettingsFromSupabase(),
+              loadSurveyTemplatesFromSupabase(),
+              loadAlbumsFromSupabase(),
+              loadFaqsFromSupabase()
+            ]);
+          });
         })
         .then(function(){
           if(CURRENT_USER_EMAIL){
