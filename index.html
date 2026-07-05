@@ -8158,13 +8158,16 @@ mikke.ruu2025@gmail.com`;
       if(!(EVENTS||[]).length){
         sel.innerHTML = '<option value="">イベントがありません</option>';
       }else{
-        sel.innerHTML = (EVENTS||[]).filter(function(e){return e.kind!=='イベント';}).slice().sort(compareEventDateAsc).map(function(e){
+        sel.innerHTML = (EVENTS||[]).filter(function(e){return e.kind!=='イベント';}).slice().sort(compareEventUpcomingFirst).map(function(e){
           var dt = formatEvDateShort(e);
           return '<option value="'+e.id+'">'+dt+' '+(e.name||'イベント名未設定')+'</option>';
         }).join('');
       }
       if(current && Array.from(sel.options).some(function(o){return o.value===current})){
         sel.value = current;
+      }else{
+        var defId = pickDefaultEventId((EVENTS||[]).filter(function(e){return e.kind!=='イベント';}));
+        if(defId) sel.value = defId;
       }
       var evId = sel.value || (EVENTS[0]||{}).id;
       var ev = (EVENTS||[]).find(function(e){return e.id===evId});
@@ -10736,7 +10739,7 @@ mikke.ruu2025@gmail.com`,
       var sel = document.getElementById('tpl-event-sel');
       if(!sel) return;
       var current = sel.value;
-      var list = (EVENTS||[]).slice().sort(compareEventDateAsc);
+      var list = (EVENTS||[]).slice().sort(compareEventUpcomingFirst);
       if(!list.length){
         sel.innerHTML = '<option value="">イベントがありません</option>';
         sel.disabled = true;
@@ -10750,6 +10753,9 @@ mikke.ruu2025@gmail.com`,
       }).join('');
       if(current && Array.from(sel.options).some(function(o){return o.value===current})){
         sel.value=current;
+      }else{
+        var defId = pickDefaultEventId(list);
+        if(defId) sel.value = defId;
       }
     }
 
@@ -11238,6 +11244,27 @@ mikke.ruu2025@gmail.com`,
       if(ad && !bd) return -1;
       if(!ad && bd) return 1;
       return 0;
+    }
+    // イベントを「未来→過去」順（開催が近い順）に並べる比較関数
+    // 今日以降のイベントを先に（近い順）、過去イベントを後に（新しい順）
+    function compareEventUpcomingFirst(a, b){
+      var ad = normalizeDateInput(a && a.date);
+      var bd = normalizeDateInput(b && b.date);
+      if(!ad && !bd) return 0;
+      if(!ad) return 1;
+      if(!bd) return -1;
+      var aFuture = ad >= TODAY;
+      var bFuture = bd >= TODAY;
+      if(aFuture && bFuture) return ad.localeCompare(bd);   // 両方未来：近い順（昇順）
+      if(!aFuture && !bFuture) return bd.localeCompare(ad); // 両方過去：新しい順（降順）
+      return aFuture ? -1 : 1;                              // 未来を先に
+    }
+    // 初期選択すべきイベントIDを返す（今日以降で直近、なければ最新の過去）
+    function pickDefaultEventId(list){
+      var arr = (list||[]).filter(function(e){return e && (normalizeDateInput(e.date) || String(e.name||'').trim());});
+      if(!arr.length) return '';
+      var sorted = arr.slice().sort(compareEventUpcomingFirst);
+      return (sorted[0] && sorted[0].id) || '';
     }
     // EVENTSは「イベント作成」フォームと同じ項目をすべて持つ
     var EVENTS = [];
@@ -13876,7 +13903,12 @@ mikke.ruu2025@gmail.com`,
         }).join('');
         noticeSel.disabled = !noticeEvents.length;
         if(noticeEvents.length){
-          if(Array.from(noticeSel.options).some(function(o){return o.value===noticeCurrent;})) noticeSel.value = noticeCurrent;
+          if(Array.from(noticeSel.options).some(function(o){return o.value===noticeCurrent;})){
+            noticeSel.value = noticeCurrent;
+          }else{
+            var noticeDef = pickDefaultEventId(noticeEvents);
+            if(noticeDef) noticeSel.value = noticeDef;
+          }
         }else{
           noticeSel.innerHTML = '<option value="">対象イベントなし</option>';
         }
