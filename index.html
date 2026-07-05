@@ -1149,7 +1149,9 @@
                   <input class="input" id="apply-achiever" placeholder="アチーバー名">
                 </div>
                 <div id="non-member-fields" class="form-section" style="display:none">
-                  <input class="input" id="apply-social" placeholder="Instagram または HP">
+                </div>
+                <div class="form-section">
+                  <input class="input" id="apply-social" placeholder="Instagram ID または URL（任意）＊告知に使用します">
                 </div>
               </div>
               <div id="apply-event-preview" style="display:none;margin-bottom:14px"></div>
@@ -4873,6 +4875,83 @@
     function getPartyChipClass(code){
       return code==='yes'?'yes':(code==='no'?'no':'tbd');
     }
+    // インスタ告知文：日付フォーマット（例：07月12日（日）11:00〜15:00）
+    function formatInstaEventDateTime(ev){
+      if(!ev) return '';
+      var parts = (ev.date||'').split('-');
+      var dateStr = '';
+      if(parts.length>=3){
+        var mm = ('0'+(+parts[1])).slice(-2);
+        var dd = ('0'+(+parts[2])).slice(-2);
+        var dow = ev.dayOfWeek || (typeof computeDayOfWeek==='function' ? computeDayOfWeek(ev.date) : '');
+        dateStr = mm+'月'+dd+'日（'+dow+'）';
+      }
+      var timeStr = '';
+      if(ev.startTime || ev.endTime){
+        timeStr = (ev.startTime||'')+'〜'+(ev.endTime||'');
+      }
+      return (dateStr+' '+timeStr).trim();
+    }
+
+    // 出店者1件分のインスタ告知文を生成してコピー
+    function copyInstaPost(appId){
+      var app = (APPLICATIONS||[]).find(function(a){return a.id===appId;});
+      if(!app){ showToast('データが見つかりません','warn'); return; }
+      var ev = (EVENTS||[]).find(function(e){return e.id===app.event;}) || null;
+      var evName = (ev && (ev.shortName || ev.name)) || 'Mikke bazar';
+      var shop = app.shopname || '';
+      var person = app.personname || '';
+      var shopLine = shop + (person ? '（'+person+'さん）' : '');
+      var social = (app.social || '').trim();
+      // @行：URLならそのまま、IDなら@付与、未入力なら @ だけ
+      var atLine = '@';
+      if(social){
+        if(/^https?:\/\//i.test(social)){ atLine = social; }
+        else { atLine = '@' + social.replace(/^@/,''); }
+      }
+      var content = app.content || '';
+      var appeal = app.comment || app.appeal || '';
+      var dateTime = formatInstaEventDateTime(ev);
+      var venue = (ev && ev.venue) || '';
+      var address = (ev && ev.address) || '';
+      var mapNote = (ev && ev.venueNote) || '';
+
+      var lines = [];
+      lines.push('🎪 '+evName+' 出店者紹介 🎪');
+      lines.push('今回ご紹介するのは…');
+      lines.push('✨ '+shopLine);
+      lines.push(atLine);
+      lines.push('⸻');
+      lines.push('🧺 出店内容');
+      lines.push('・'+content);
+      lines.push('⸻');
+      lines.push('💬 アピールポイント');
+      lines.push(appeal);
+      lines.push('⸻');
+      lines.push('📍 イベント概要');
+      if(dateTime) lines.push('🗓 '+dateTime);
+      if(venue)    lines.push('🏠 '+venue);
+      if(address)  lines.push('　'+address);
+      lines.push('こだわりのお店が集まります🛍');
+      lines.push('ぜひ遊びに来てください✨');
+      lines.push('⸻');
+      lines.push('#mikkebazar');
+      lines.push('#ミッケバザール');
+      lines.push('#Mikkebazar');
+      lines.push('#マルシェ');
+      lines.push('#バザール');
+
+      var text = lines.join('\n');
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(
+          function(){ showToast('インスタ告知文をコピーしました📸','success'); },
+          function(){ prompt('以下をコピーしてください', text); }
+        );
+      }else{
+        prompt('以下をコピーしてください', text);
+      }
+    }
+
     function buildApplicationCard(app){
       var ev = (EVENTS||[]).find(function(e){return e.id===app.event;});
       var isEventApp = isParticipantOnlyEvent(ev) || app.category==='event';
@@ -4952,6 +5031,7 @@
             (isEventApp ? '' : '<button class="status-chip line-quick'+(lineDone?' active':'')+'" style="'+(lineDone?'background:#3ba48a;border-color:#3ba48a':'')+'" onclick="quickToggleLine(\''+h(app.id)+'\',this)">LINE済み</button>')+
             (app.status==='confirmed' ? '<button class="status-chip" onclick="event.stopPropagation();openReceiptWindow(\''+h(app.id)+'\')">🧾 領収書</button>' : '')+
             '<button class="status-chip" style="margin-left:auto" onclick="event.stopPropagation();openAppEditSheet(\''+h(app.id)+'\')">✎ 編集</button>'+
+            (isEventApp ? '' : '<button class="status-chip" onclick="event.stopPropagation();copyInstaPost(\''+h(app.id)+'\')">📸 告知文</button>')+
           '</div>'+
           '<div class="app-section">'+
             '<p class="app-section-title">基本情報</p>'+
