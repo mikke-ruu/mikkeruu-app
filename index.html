@@ -8158,7 +8158,7 @@ mikke.ruu2025@gmail.com`;
       if(!(EVENTS||[]).length){
         sel.innerHTML = '<option value="">イベントがありません</option>';
       }else{
-        sel.innerHTML = (EVENTS||[]).filter(function(e){return e.kind!=='イベント';}).slice().sort(compareEventUpcomingFirst).map(function(e){
+        sel.innerHTML = (EVENTS||[]).filter(function(e){return e.kind!=='イベント';}).slice().sort(compareEventDateDesc).map(function(e){
           var dt = formatEvDateShort(e);
           return '<option value="'+e.id+'">'+dt+' '+(e.name||'イベント名未設定')+'</option>';
         }).join('');
@@ -9055,7 +9055,7 @@ mikke.ruu2025@gmail.com`,
         applyEventOnlyData('');
         return;
       }
-      list.sort(compareEventDateAsc);
+      list.sort(compareEventDateDesc);
       sel.disabled = false;
       sel.innerHTML = list.map(function(ev){
         var iso = normalizeDateInput(ev.date);
@@ -9065,7 +9065,9 @@ mikke.ruu2025@gmail.com`,
       if(current && Array.from(sel.options).some(function(o){return o.value===current;})){
         sel.value = current;
       }else{
-        sel.selectedIndex = 0;
+        var evtDef = pickDefaultEventId(list);
+        if(evtDef){ sel.value = evtDef; }
+        else { sel.selectedIndex = 0; }
       }
       applyEventOnlyData(sel.value);
     }
@@ -10739,7 +10741,7 @@ mikke.ruu2025@gmail.com`,
       var sel = document.getElementById('tpl-event-sel');
       if(!sel) return;
       var current = sel.value;
-      var list = (EVENTS||[]).slice().sort(compareEventUpcomingFirst);
+      var list = (EVENTS||[]).slice().sort(compareEventDateDesc);
       if(!list.length){
         sel.innerHTML = '<option value="">イベントがありません</option>';
         sel.disabled = true;
@@ -11241,6 +11243,15 @@ mikke.ruu2025@gmail.com`,
       var ad = normalizeDateInput(a && a.date);
       var bd = normalizeDateInput(b && b.date);
       if(ad && bd) return ad.localeCompare(bd);
+      if(ad && !bd) return -1;
+      if(!ad && bd) return 1;
+      return 0;
+    }
+    // イベントを日付降順（新しい順）に並べる比較関数
+    function compareEventDateDesc(a, b){
+      var ad = normalizeDateInput(a && a.date);
+      var bd = normalizeDateInput(b && b.date);
+      if(ad && bd) return bd.localeCompare(ad);
       if(ad && !bd) return -1;
       if(!ad && bd) return 1;
       return 0;
