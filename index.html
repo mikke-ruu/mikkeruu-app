@@ -6941,6 +6941,9 @@
         '<article class="card event-card">'+
           heroHtml+
           '<div style="display:flex;gap:6px;flex-wrap:wrap">'+kindBadge+statusBadge+'</div>'+
+          (CURRENT_USER_ROLE==='admin'
+            ? '<div style="margin-top:8px"><button class="secondary" type="button" style="width:100%" onclick="event.stopPropagation();copyEventInviteLink(\''+ev.id+'\')">🔗 招待リンクをコピー（締切後でも申込可）</button></div>'
+            : '')+
           '<h1 class="event-title">'+ev.name.replace(' たまプラーザ','<br>たまプラーザ').replace(' 錦糸町','<br>錦糸町').replace(' 宮前平','<br>宮前平').replace(' 渋谷','<br>渋谷')+'</h1>'+
           '<div class="event-meta">'+
             '<span><svg class="icon"><use href="#i-calendar"/></svg> '+formatEvDateShort(ev)+' '+(ev.startTime||'')+'〜'+(ev.endTime||'')+'</span>'+
@@ -12870,7 +12873,6 @@ mikke.ruu2025@gmail.com`,
         '<div class="sheet-actions">'+
           '<button class="primary" onclick="openEventEditConfirm(\''+id+'\')">確認する</button>'+
           '<button class="secondary" onclick="closeSheet()">キャンセル</button>'+
-          '<button class="secondary" type="button" onclick="copyEventInviteLink(\''+id+'\')">🔗 招待リンクをコピー（締切後でも申込可）</button>'+
         '</div>';
       openSheet('イベント編集', ev.name, html);
       // セレクト初期値を遅延設定
