@@ -3031,6 +3031,24 @@
       }
       return true;
     }
+    // 招待リンク（#apply-invite=イベントID）を検知して締切チェックを迂回で開く
+    function tryOpenInviteFromHash(rawHash){
+      var m = String(rawHash||'').match(/^apply-invite=([^&]+)/);
+      if(!m) return false;
+      var key = decodeURIComponent(m[1]);
+      var ev = (EVENTS||[]).find(function(e){return e.id===key || e.supabaseId===key;});
+      if(ev){
+        openApplyForEvent(ev.id, true);
+      }else{
+        // イベント読込前なら少し待ってから再試行
+        setTimeout(function(){
+          var ev2 = (EVENTS||[]).find(function(e){return e.id===key || e.supabaseId===key;});
+          if(ev2){ openApplyForEvent(ev2.id, true); }
+          else { showToast('招待リンクのイベントが見つかりませんでした','warn'); showPage('home', true); }
+        }, 1200);
+      }
+      return true;
+    }
     async function sendAdminMagicLink(){
       var sb = getSupabaseClient();
       if(!sb){
@@ -3725,10 +3743,10 @@
       if(eventId){CURRENT_PARTY_EVID = eventId}
       showPage('party');
     }
-    function openApplyForEvent(eventId){
+    function openApplyForEvent(eventId, isInvite){
       var targetId = eventId || APPLY_EVENT_ID;
       var ev = (EVENTS||[]).find(function(e){return e.id===targetId;});
-      if(ev){
+      if(ev && !isInvite){
         var st = getEventEffectiveStatus(ev);
         var dlPassed = !!(ev.deadline && TODAY > ev.deadline);
         if(st==='past' || st==='draft' || dlPassed){
@@ -3737,6 +3755,14 @@
         }
         if(ev.recruitStart && TODAY < normalizeDateInput(ev.recruitStart)){
           showToast('募集開始前です（'+normalizeDateInput(ev.recruitStart)+'から）','warn');
+          return;
+        }
+      }
+      if(ev && isInvite){
+        // 招待リンクでは下書き・開催済みだけは弾く（ゴミURLや終わったイベントは通さない）
+        var st2 = getEventEffectiveStatus(ev);
+        if(st2==='draft' || st2==='past'){
+          showToast('このイベントは現在お申し込みいただけません','warn');
           return;
         }
       }
@@ -4894,6 +4920,20 @@
     }
 
     // 出店者1件分のインスタ告知文を生成してコピー
+    function copyEventInviteLink(eventId){
+      var ev = (EVENTS||[]).find(function(e){return e.id===eventId;});
+      if(!ev){ showToast('イベントが見つかりません','warn'); return; }
+      var url = getAppBaseUrl() + '#apply-invite=' + encodeURIComponent(ev.id);
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(url).then(
+          function(){ showToast('招待リンクをコピーしました🔗（募集終了後でもこのリンクからは申込できます）','success'); },
+          function(){ prompt('以下をコピーしてください', url); }
+        );
+      }else{
+        prompt('以下をコピーしてください', url);
+      }
+    }
+
     function copyInstaPost(appId){
       var app = (APPLICATIONS||[]).find(function(a){return a.id===appId;});
       if(!app){ showToast('データが見つかりません','warn'); return; }
@@ -5510,6 +5550,8 @@
         // ログインリンク経由（Supabase認証コールバック）。ページ名ではないので
         // ホームを表示しておき、initSupabaseAuthFromUrl がログイン処理後にマイページへ遷移する
         showPage('home', true);
+      }else if(rawHash.indexOf('apply-invite=')===0){
+        tryOpenInviteFromHash(rawHash);
       }else if(rawHash.indexOf('event=')===0){
         tryOpenEventFromHash(rawHash);
       }else if(rawHash.indexOf('survey')===0){
@@ -12828,6 +12870,7 @@ mikke.ruu2025@gmail.com`,
         '<div class="sheet-actions">'+
           '<button class="primary" onclick="openEventEditConfirm(\''+id+'\')">確認する</button>'+
           '<button class="secondary" onclick="closeSheet()">キャンセル</button>'+
+          '<button class="secondary" type="button" onclick="copyEventInviteLink(\''+id+'\')">🔗 招待リンクをコピー（締切後でも申込可）</button>'+
         '</div>';
       openSheet('イベント編集', ev.name, html);
       // セレクト初期値を遅延設定
