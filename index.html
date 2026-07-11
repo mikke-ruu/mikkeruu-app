@@ -2089,6 +2089,7 @@
     var CURRENT_USER_EMAIL = '';
     var APPLY_TERMS_ACK = false;
     var APPLICATIONS = [];
+    var PUBLIC_EXHIBITORS = [];
     var PARTY_APPLICATIONS = [];
     var EVENTS_LOADING = true; // Supabaseからの初回イベント読み込みが終わるまで true
     var EVENTS_LOADED = false;
@@ -2577,6 +2578,22 @@
        ───────────────────────────────────────────────────── */
     // ファイルを event-images バケットにアップロードしてパブリックURLを返す
     // 失敗時は null を返す
+    // 出店者一覧（一般公開用・個人情報を含まないビューから取得）
+    async function loadPublicExhibitorsFromSupabase(){
+      var sb = getSupabaseClient() || (window.supabase && window.supabase.createClient
+        ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null);
+      if(!sb) return false;
+      try{
+        var res = await sb.from('public_exhibitors').select('*');
+        if(res.error) throw res.error;
+        PUBLIC_EXHIBITORS = res.data || [];
+        return true;
+      }catch(e){
+        console.error('loadPublicExhibitorsFromSupabase failed:', e.message||e);
+        return false;
+      }
+    }
+
     async function uploadFileToStorage(path, file, clientOverride){
       var sb = clientOverride || getSupabaseClient();
       if(!sb || !file) return null;
@@ -6884,9 +6901,19 @@
       var isEventOnly = isParticipantOnlyEvent(ev);
       var kindBadge = getEventKindBadgeHtml(ev);
       var favoriteButton = renderFavoriteButton(ev.id);
-      // 出店者（確定者・アイキャッチ提出済みの人のみ公開）
-      var confirmedApps = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card'))
-        .filter(function(c){return c.dataset.event===ev.id && c.dataset.status==='confirmed' && !isEventOnly && /^(https?:|data:image)/.test(c.dataset.eyecatchsrc||'')});
+      // 出店者（確定者・アイキャッチ提出済みの人のみ公開） … public_exhibitors ビューから取得
+      var evKeySet = new Set([ev.id, ev.supabaseId].filter(Boolean));
+      var confirmedApps = (PUBLIC_EXHIBITORS||[])
+        .filter(function(r){return evKeySet.has(r.event_id) && !isEventOnly && /^(https?:|data:image)/.test(r.eyecatch_image_url||'')})
+        .map(function(r){
+          return {
+            dataset: {
+              shopname: r.shop_name||'',
+              category: r.category||'',
+              eyecatchsrc: r.eyecatch_image_url||''
+            }
+          };
+        });
       var exhibitorsHtml = confirmedApps.length ?
         confirmedApps.map(function(c){
           var name = c.dataset.shopname||'';
@@ -6968,9 +6995,19 @@
         return;
       }
       if(sub) sub.textContent = ev.name + ' に参加する出店者さんをご紹介します。';
-      // アイキャッチ提出済みの出店者のみ公開
-      var apps = Array.from(document.querySelectorAll('#admin-applications .exhibitor-card'))
-        .filter(function(c){return c.dataset.event===ev.id && c.dataset.status==='confirmed' && /^(https?:|data:image)/.test(c.dataset.eyecatchsrc||'')});
+      // アイキャッチ提出済みの出店者のみ公開 … public_exhibitors ビューから取得
+      var evKeySet2 = new Set([ev.id, ev.supabaseId].filter(Boolean));
+      var apps = (PUBLIC_EXHIBITORS||[])
+        .filter(function(r){return evKeySet2.has(r.event_id) && /^(https?:|data:image)/.test(r.eyecatch_image_url||'')})
+        .map(function(r){
+          return {
+            dataset: {
+              shopname: r.shop_name||'',
+              category: r.category||'',
+              eyecatchsrc: r.eyecatch_image_url||''
+            }
+          };
+        });
       // タブのカウント
       var tabs = document.querySelectorAll('#exhibitors-tabs button');
       if(tabs.length>=5){
@@ -14099,8 +14136,12 @@ mikke.ruu2025@gmail.com`,
               loadOrgSettingsFromSupabase(),
               loadSurveyTemplatesFromSupabase(),
               loadAlbumsFromSupabase(),
-              loadFaqsFromSupabase()
-            ]);
+              loadFaqsFromSupabase(),
+              loadPublicExhibitorsFromSupabase()
+            ]).then(function(){
+              syncPublicEventViews(true);
+              if(typeof renderExhibitorsPage==='function') renderExhibitorsPage();
+            });
           });
         })
         .then(function(){
