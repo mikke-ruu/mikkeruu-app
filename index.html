@@ -8729,6 +8729,57 @@ mikke.ruu2025@gmail.com`,
       if(id === 'admin-org-settings') setTimeout(loadOrgSettingsToForm, 50);
     };
 
+    // 領収書URL（#receipt&id=申込ID）を検知して、ログイン不要でその場で表示する
+    async function checkReceiptUrlParams(){
+      var h = location.hash || '';
+      if(h.indexOf('receipt')!==0 && h.indexOf('#receipt')!==0) return false;
+      var query = h.replace(/^#?receipt&?/, '');
+      var params = new URLSearchParams(query);
+      var appId = params.get('id') || '';
+      if(!appId){ return false; }
+      var sb = getSupabaseClient() || (window.supabase && window.supabase.createClient
+        ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null);
+      if(!sb){ showToast('通信の準備中です。少し待ってから開き直してください','warn'); return true; }
+      try{
+        var res = await sb.from('public_receipts').select('*').eq('id', appId).maybeSingle();
+        if(res.error) throw res.error;
+        var r = res.data;
+        if(!r){
+          showToast('領収書が見つかりませんでした（対象外か、まだ確定されていません）','warn');
+          return true;
+        }
+        renderPublicReceipt(r);
+      }catch(e){
+        showToast('領収書の取得に失敗しました：'+((e&&e.message)||e),'warn');
+      }
+      return true;
+    }
+    // 一般公開の領収書表示（public_receipts の1行から組み立てる。印刷/PDF保存可）
+    function renderPublicReceipt(r){
+      var name = r.shop_name || r.person_name || '';
+      var yen = 0;
+      if(r.answers && r.answers.feeYen){ yen = parseInt(r.answers.feeYen, 10) || 0; }
+      var eventName = r.event_name || '';
+      var dateStr = '';
+      if(r.event_starts_at){
+        try{
+          var d = new Date(r.event_starts_at);
+          dateStr = d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日';
+        }catch(e){}
+      }
+      var isEv = r.category === 'event';
+      openPrintWindow('領収書',
+        '<div class="receipt">'+
+          '<h1>領収書</h1>'+
+          '<div class="r-row"><span>宛名</span><span>'+h(name)+' 様</span></div>'+
+          '<div class="r-amount">¥'+yen.toLocaleString()+'－</div>'+
+          '<div class="r-row"><span>但し</span><span>'+h(eventName)+' '+(isEv?'参加費':'出店料')+'として</span></div>'+
+          '<div class="r-row"><span>開催日</span><span>'+h(dateStr)+'</span></div>'+
+          '<div class="r-row"><span>発行日</span><span>'+todayStr()+'</span></div>'+
+          '<div class="r-row"><span>発行者</span><span style="white-space:pre-wrap;text-align:right">'+h(getReceiptIssuer())+'</span></div>'+
+          '<p style="font-size:11px;color:#666;margin-top:16px">上記正に領収いたしました。本領収書は電子発行のため印紙はありません。</p>'+
+        '</div>');
+    }
     // URL ハッシュからアンケート画面を開く
     function checkSurveyUrlParams(){
       var h = location.hash || '';
@@ -8749,6 +8800,9 @@ mikke.ruu2025@gmail.com`,
     document.addEventListener('DOMContentLoaded', checkSurveyUrlParams);
     window.addEventListener('hashchange', checkSurveyUrlParams);
     setTimeout(checkSurveyUrlParams, 300);
+    document.addEventListener('DOMContentLoaded', checkReceiptUrlParams);
+    window.addEventListener('hashchange', checkReceiptUrlParams);
+    setTimeout(checkReceiptUrlParams, 300);
 
     function openHistorySheet(e){
       if(e){e.preventDefault();e.stopPropagation()}
