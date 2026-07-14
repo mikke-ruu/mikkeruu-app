@@ -3986,12 +3986,17 @@
       APPLY_EVENT_ID = eventId;
       updateApplyModeUI();
       renderApplyFeePlans();
+      var flow = getApplyStepFlow();
       var draft = APPLY_DRAFTS[getApplyDraftEventKey(eventId)];
       if(draft){
         applyDraftToForm(draft);
+        // 再開時に確認ステップ（フロー最終）へ直接戻ると「やり直せない・戻れない」ため
+        // 先頭ステップから見直せるようにする（入力値は保持）
+        if(forceResetStep || applyStep === flow[flow.length-1]){
+          applyStep = flow[0];
+        }
       }else{
         resetApplyFormFields();
-        var flow = getApplyStepFlow();
         applyStep = forceResetStep ? flow[0] : normalizeApplyStepForFlow(applyStep);
       }
       renderApplyStep();
