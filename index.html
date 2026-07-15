@@ -6084,7 +6084,9 @@
       var names = cards.map(function(c){ return c.dataset.shopname||c.dataset.personname||''; }).filter(Boolean);
       var nameList = names.slice(0,10).map(function(n){ return '・'+n; }).join('\n')+(names.length>10?'\n…他'+(names.length-10)+'名':'');
       if(!confirm('選択した'+cards.length+'名にお礼メールを送ります。\n\n'+nameList+'\n\nアンケートURLは自動で入ります。よろしいですか？')) return;
-      var surveyUrl = (typeof getExhibitorSurveyUrl==='function') ? getExhibitorSurveyUrl(ev.id) : '';
+      var surveyUrl = isParticipantOnlyEvent(ev)
+        ? ''
+        : ((typeof getExhibitorSurveyUrl==='function') ? getExhibitorSurveyUrl(ev.id) : '');
       var nextLabel = prompt('次回イベントの見出し（任意・空欄でスキップ）\n例：8月のキッズマルシェ','') || '';
       var nextUrl = '';
       if(nextLabel){ nextUrl = prompt('次回イベントの募集URL（任意・空欄可）','') || ''; }
@@ -11875,7 +11877,9 @@ mikke.ruu2025@gmail.com`,
       var n = confirmedCards.length;
       var evTitle = ev.title||ev.name||'このイベント';
       if(!confirm('「'+evTitle+'」の出店確定者'+(n?('（約'+n+'名）'):'')+'にお礼メールを送ります。\nアンケートURLは自動で入ります。よろしいですか？')) return;
-      var surveyUrl = (typeof getExhibitorSurveyUrl==='function') ? getExhibitorSurveyUrl(ev.id) : '';
+      var surveyUrl = isParticipantOnlyEvent(ev)
+        ? ''
+        : ((typeof getExhibitorSurveyUrl==='function') ? getExhibitorSurveyUrl(ev.id) : '');
       var nextLabel = prompt('次回イベントの見出し（任意・空欄でスキップ）\n例：8月のキッズマルシェ','') || '';
       var nextUrl = '';
       if(nextLabel){ nextUrl = prompt('次回イベントの募集URL（任意・空欄可）','') || ''; }
