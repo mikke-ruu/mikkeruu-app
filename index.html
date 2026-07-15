@@ -5583,6 +5583,11 @@
         if(ret==='admin-survey'){
           setTimeout(function(){toggleAdminPanel('admin-survey')}, 20);
         }
+      }else if(rawHash.indexOf('receipt')===0){
+        // 領収書リンク（#receipt&id=申込ID）。ページIDではないので存在しないページを
+        // 表示しようとして画面が真っ白になっていた。ホームを裏に表示しておき、
+        // checkReceiptUrlParams がその上に領収書オーバーレイを重ねて表示する。
+        showPage('home', true);
       }else{
         showPage(rawHash, true);
       }
@@ -8737,6 +8742,7 @@ mikke.ruu2025@gmail.com`,
     };
 
     // 領収書URL（#receipt&id=申込ID）を検知して、ログイン不要でその場で表示する
+    var __receiptOpening = ''; // 二重呼び出し（DOMContentLoaded と setTimeout）で2回開くのを防ぐ
     async function checkReceiptUrlParams(){
       var h = location.hash || '';
       if(h.indexOf('receipt')!==0 && h.indexOf('#receipt')!==0) return false;
@@ -8744,8 +8750,20 @@ mikke.ruu2025@gmail.com`,
       var params = new URLSearchParams(query);
       var appId = params.get('id') || '';
       if(!appId){ return false; }
-      var sb = getSupabaseClient() || (window.supabase && window.supabase.createClient
-        ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null);
+      if(__receiptOpening === appId) return true;
+      __receiptOpening = appId;
+      // supabase-js は <script async> のため DOMContentLoaded 時点ではまだ未読込のことがある。
+      // 諦めずに読み込み完了を最大10秒待つ（待たずに return すると領収書が出ないまま終わっていた）
+      var sb = getSupabaseClient();
+      if(!sb){
+        sb = await new Promise(function(resolve){
+          var tries = 0;
+          var timer = setInterval(function(){
+            var c = getSupabaseClient();
+            if(c || ++tries > 100){ clearInterval(timer); resolve(c || null); }
+          }, 100);
+        });
+      }
       if(!sb){ showToast('通信の準備中です。少し待ってから開き直してください','warn'); return true; }
       try{
         var res = await sb.from('public_receipts').select('*').eq('id', appId).maybeSingle();
